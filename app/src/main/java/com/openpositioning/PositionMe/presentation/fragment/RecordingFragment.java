@@ -32,8 +32,8 @@ import com.openpositioning.PositionMe.sensors.SensorTypes;
 import com.openpositioning.PositionMe.utils.UtilFunctions;
 import com.google.android.gms.maps.model.LatLng;
 
-vsgjgvhjv
 /**
+ * avghdvh
  * Fragment responsible for managing the recording process of trajectory data.
  * <p>
  * The RecordingFragment serves as the interface for users to initiate, monitor, and
