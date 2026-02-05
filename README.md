@@ -18,7 +18,7 @@
 - **Android Studio 4.2** or later
 - **Android SDK 30** or later
 
-## Installation
+## Installation:
 
 1. **Clone the repository.**
 2. **Open the project in Android Studio**.
