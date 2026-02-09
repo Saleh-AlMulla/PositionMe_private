@@ -64,6 +64,12 @@ public class RecordingFragment extends Fragment {
     private ProgressBar timeRemaining;
     private TextView elevation, distanceTravelled, gnssError;
 
+    // Test point button & numbering
+    private MaterialButton addTagButton;
+    private int nextTestPointId = 1;
+    // Relative timestamp base (UNIX ms). All sub-message timestamps are relative to this.
+    private long startTimestampMs;
+
     // App settings
     private SharedPreferences settings;
 
@@ -100,6 +106,10 @@ public class RecordingFragment extends Fragment {
         Context context = requireActivity();
         this.settings = PreferenceManager.getDefaultSharedPreferences(context);
         this.refreshDataHandler = new Handler();
+
+        // UNIX timestamp (ms) marking the start of trajectory recording.
+        // All sub-message timestamps (including test_points) should be relative to this.
+        startTimestampMs = System.currentTimeMillis();
     }
 
     @Nullable
@@ -139,6 +149,9 @@ public class RecordingFragment extends Fragment {
         cancelButton = view.findViewById(R.id.cancelButton);
         recIcon = view.findViewById(R.id.redDot);
         timeRemaining = view.findViewById(R.id.timeRemainingBar);
+
+        //Add button
+        addTagButton = view.findViewById(R.id.button_add_tag);
 
         // Hide or initialize default values
         gnssError.setVisibility(View.GONE);
@@ -180,6 +193,33 @@ public class RecordingFragment extends Fragment {
 
             dialog.show(); // Finally, show the dialog
         });
+
+        //test press, loc and marker num
+//        addTagButton.setOnClickListener(v -> {
+//            android.widget.Toast.makeText(requireContext(), "Add Tag pressed", android.widget.Toast.LENGTH_SHORT).show();
+//
+//            LatLng loc = (trajectoryMapFragment != null) ? trajectoryMapFragment.getCurrentLocation() : null;
+//            android.widget.Toast.makeText(requireContext(),
+//                    "loc = " + (loc == null ? "null" : (loc.latitude + "," + loc.longitude)),
+//                    android.widget.Toast.LENGTH_SHORT).show();
+//
+//            if (trajectoryMapFragment != null && loc != null) {
+//                int id = nextTestPointId++;
+//                trajectoryMapFragment.addNumberedMarker(loc, String.valueOf(id));
+//                android.widget.Toast.makeText(requireContext(), "Marker added: " + id, android.widget.Toast.LENGTH_SHORT).show();
+//            } else {
+//                android.widget.Toast.makeText(requireContext(), "Cannot add marker (map/loc null)", android.widget.Toast.LENGTH_SHORT).show();
+//            }
+//        });
+
+        addTagButton.setOnClickListener(v -> {
+            LatLng loc = trajectoryMapFragment.getCurrentLocation();
+            if (loc == null) return;
+
+            int id = nextTestPointId++;
+            trajectoryMapFragment.addNumberedMarker(loc, String.valueOf(id));
+        });
+
 
         // The blinking effect for recIcon
         blinkingRecordingIcon();

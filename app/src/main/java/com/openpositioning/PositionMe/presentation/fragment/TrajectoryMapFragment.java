@@ -362,6 +362,28 @@ public class TrajectoryMapFragment extends Fragment {
     /**
      * Called when we want to set or update the GNSS marker position
      */
+
+
+
+    /**
+     * Add a numbered marker (e.g., "1", "2", "3") at the given position.
+     * Used for user-defined test points during recording.
+     *
+     * @param pos   Marker location.
+     * @param label Marker label (typically an incrementing number).
+     */
+    public void addNumberedMarker(@NonNull LatLng pos, @NonNull String label) {
+        if (gMap == null) return;
+
+        gMap.addMarker(new MarkerOptions()
+                .position(pos)
+                .title("Test Point " + label));
+
+        // camera to the marker
+        gMap.animateCamera(CameraUpdateFactory.newLatLng(pos));
+    }
+
+
     public void updateGNSS(@NonNull LatLng gnssLocation) {
         if (gMap == null) return;
         if (!isGnssOn) return;
