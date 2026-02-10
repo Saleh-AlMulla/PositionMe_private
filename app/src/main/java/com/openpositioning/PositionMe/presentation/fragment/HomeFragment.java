@@ -390,6 +390,276 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             }
         }
     }
+
+
+    /**
+     * Step (d): Draw building outlines / venue markers from the floorplan API response.
+     * We keep parsing flexible because the API may return either:
+     *  - a JSON array of venues, or
+     *  - a GeoJSON-like object with "features".
+     */
+    private void renderVenuesOnMap(@NonNull String rawJson) {
+
+        if (mMap == null) return;
+
+        // Clear previous overlays
+        clearVenueOverlays();
+
+        try {
+            // Try as array first
+            JSONArray venuesArray = tryParseAsArray(rawJson);
+            if (venuesArray == null) {
+                // Try as object with "features"
+                JSONObject obj = new JSONObject(rawJson);
+                if (obj.has("features")) {
+                    venuesArray = obj.getJSONArray("features");
+                }
+            }
+
+            if (venuesArray == null || venuesArray.length() == 0) {
+                Toast.makeText(requireContext(),
+                        "No indoor venues to display.",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            int drawnCount = 0;
+
+            for (int i = 0; i < venuesArray.length(); i++) {
+                JSONObject venue = venuesArray.getJSONObject(i);
+
+                // Extract polygon points if available
+                List<LatLng> outline = extractVenueOutlineLatLngs(venue);
+
+                if (outline != null && outline.size() >= 3) {
+                    Polygon poly = mMap.addPolygon(new PolygonOptions()
+                            .addAll(outline)
+                            .clickable(true));
+                    venuePolygons.add(poly);
+                    polygonToVenue.put(poly, venue);
+                    drawnCount++;
+                } else {
+                    // Fallback: try to place a marker (center point)
+                    LatLng center = extractVenueCenterLatLng(venue);
+                    if (center != null) {
+                        Marker m = mMap.addMarker(new MarkerOptions()
+                                .position(center)
+                                .title(extractVenueName(venue)));
+                        if (m != null) venueMarkers.add(m);
+                        drawnCount++;
+                    }
+                }
+            }
+
+            // Click listener: selecting a venue is required in Part (d)
+            mMap.setOnPolygonClickListener(polygon -> {
+                JSONObject venue = polygonToVenue.get(polygon);
+                if (venue == null) return;
+
+                // Minimal "selection" for Step 3: show a toast + log.
+                // Step 4 will persist venue + open floorplan/floor picker.
+                String name = extractVenueName(venue);
+                Toast.makeText(requireContext(),
+                        "Selected venue: " + name,
+                        Toast.LENGTH_LONG).show();
+
+                Log.d(TAG, "Selected venue JSON: " + venue.toString());
+            });
+
+            Toast.makeText(requireContext(),
+                    "Displayed " + drawnCount + " venue(s) on the map.",
+                    Toast.LENGTH_LONG).show();
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to render venues: " + rawJson, e);
+            Toast.makeText(requireContext(),
+                    "Could not parse indoor venue response (see Logcat).",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Nullable
+    private JSONArray tryParseAsArray(@NonNull String rawJson) {
+        try {
+            return new JSONArray(rawJson);
+        } catch (JSONException ignored) {
+            return null;
+        }
+    }
+
+    private void clearVenueOverlays() {
+        for (Polygon p : venuePolygons) p.remove();
+        venuePolygons.clear();
+        polygonToVenue.clear();
+
+        for (Marker m : venueMarkers) m.remove();
+        venueMarkers.clear();
+    }
+
+    /**
+     * Attempt to extract a venue name for UI feedback.
+     * Tries common fields; falls back to "Venue".
+     */
+    @NonNull
+    private String extractVenueName(@NonNull JSONObject venue) {
+        // GeoJSON style: { properties: { name: ... } }
+        JSONObject props = venue.optJSONObject("properties");
+        if (props != null) {
+            String n = props.optString("name", "");
+            if (!n.isEmpty()) return n;
+            n = props.optString("venue", "");
+            if (!n.isEmpty()) return n;
+            n = props.optString("id", "");
+            if (!n.isEmpty()) return n;
+        }
+
+        // Flat style: { name: ... } or { venue: ... }
+        String name = venue.optString("name", "");
+        if (!name.isEmpty()) return name;
+
+        name = venue.optString("venue", "");
+        if (!name.isEmpty()) return name;
+
+        name = venue.optString("id", "");
+        if (!name.isEmpty()) return name;
+
+        return "Venue";
+    }
+
+    /**
+     * Extract polygon outline points.
+     * Supports common structures:
+     *  1) GeoJSON: geometry: { type:"Polygon", coordinates:[ [ [lon,lat], ... ] ] }
+     *  2) Custom: outline: [ {lat:.., lon:..}, ... ] or outline: [ [lon,lat], ... ]
+     */
+    @Nullable
+    private List<LatLng> extractVenueOutlineLatLngs(@NonNull JSONObject venue) {
+
+        // Case A: GeoJSON geometry
+        JSONObject geometry = venue.optJSONObject("geometry");
+        if (geometry != null) {
+            String type = geometry.optString("type", "");
+            if ("Polygon".equalsIgnoreCase(type)) {
+                JSONArray coords = geometry.optJSONArray("coordinates");
+                List<LatLng> out = parseGeoJsonPolygon(coords);
+                if (out != null) return out;
+            }
+        }
+
+        // Case B: direct outline
+        JSONArray outlineArr = venue.optJSONArray("outline");
+        if (outlineArr != null) {
+            List<LatLng> out = parseOutlineArray(outlineArr);
+            if (out != null) return out;
+        }
+
+        // Case C: properties.outline
+        JSONObject props = venue.optJSONObject("properties");
+        if (props != null) {
+            JSONArray propsOutline = props.optJSONArray("outline");
+            if (propsOutline != null) {
+                List<LatLng> out = parseOutlineArray(propsOutline);
+                if (out != null) return out;
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private List<LatLng> parseGeoJsonPolygon(@Nullable JSONArray coordinates) {
+        if (coordinates == null) return null;
+
+        // GeoJSON polygon coordinates: [ [ [lon,lat], [lon,lat], ... ] , ... ]
+        // We take the outer ring: coordinates[0]
+        JSONArray outerRing = coordinates.optJSONArray(0);
+        if (outerRing == null) return null;
+
+        List<LatLng> pts = new ArrayList<>();
+        for (int i = 0; i < outerRing.length(); i++) {
+            JSONArray pair = outerRing.optJSONArray(i);
+            if (pair == null || pair.length() < 2) continue;
+
+            double lon = pair.optDouble(0, Double.NaN);
+            double lat = pair.optDouble(1, Double.NaN);
+            if (Double.isNaN(lat) || Double.isNaN(lon)) continue;
+
+            pts.add(new LatLng(lat, lon));
+        }
+
+        // Some polygons repeat first point at end; that's fine for Google Maps.
+        return pts.size() >= 3 ? pts : null;
+    }
+
+    @Nullable
+    private List<LatLng> parseOutlineArray(@NonNull JSONArray outlineArr) {
+        List<LatLng> pts = new ArrayList<>();
+
+        for (int i = 0; i < outlineArr.length(); i++) {
+            Object item = outlineArr.opt(i);
+
+            if (item instanceof JSONObject) {
+                JSONObject o = (JSONObject) item;
+                double lat = o.optDouble("lat", Double.NaN);
+                double lon = o.optDouble("lon", Double.NaN);
+
+                // Sometimes it's lng instead of lon
+                if (Double.isNaN(lon)) lon = o.optDouble("lng", Double.NaN);
+
+                if (!Double.isNaN(lat) && !Double.isNaN(lon)) {
+                    pts.add(new LatLng(lat, lon));
+                }
+            } else if (item instanceof JSONArray) {
+                JSONArray pair = (JSONArray) item;
+                if (pair.length() >= 2) {
+                    double lon = pair.optDouble(0, Double.NaN);
+                    double lat = pair.optDouble(1, Double.NaN);
+                    if (!Double.isNaN(lat) && !Double.isNaN(lon)) {
+                        pts.add(new LatLng(lat, lon));
+                    }
+                }
+            }
+        }
+
+        return pts.size() >= 3 ? pts : null;
+    }
+
+    /**
+     * Fallback marker center extraction.
+     * Supports:
+     *  - { lat:..., lon:... }
+     *  - { properties: { lat/lon } }
+     *  - GeoJSON Point geometry
+     */
+    @Nullable
+    private LatLng extractVenueCenterLatLng(@NonNull JSONObject venue) {
+
+        double lat = venue.optDouble("lat", Double.NaN);
+        double lon = venue.optDouble("lon", Double.NaN);
+        if (!Double.isNaN(lat) && !Double.isNaN(lon)) return new LatLng(lat, lon);
+
+        JSONObject props = venue.optJSONObject("properties");
+        if (props != null) {
+            lat = props.optDouble("lat", Double.NaN);
+            lon = props.optDouble("lon", Double.NaN);
+            if (!Double.isNaN(lat) && !Double.isNaN(lon)) return new LatLng(lat, lon);
+        }
+
+        JSONObject geometry = venue.optJSONObject("geometry");
+        if (geometry != null) {
+            String type = geometry.optString("type", "");
+            if ("Point".equalsIgnoreCase(type)) {
+                JSONArray coords = geometry.optJSONArray("coordinates");
+                if (coords != null && coords.length() >= 2) {
+                    lon = coords.optDouble(0, Double.NaN);
+                    lat = coords.optDouble(1, Double.NaN);
+                    if (!Double.isNaN(lat) && !Double.isNaN(lon)) return new LatLng(lat, lon);
+                }
+            }
+        }
+
+        return null;
+    }
 }
 
 
