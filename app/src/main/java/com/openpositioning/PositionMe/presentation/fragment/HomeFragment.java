@@ -165,9 +165,9 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         indoorButton.setOnClickListener(v -> {
             requestNearbyIndoorMaps();
 
-            // Keep your existing screen (SSID/RSSI list) if you still want it
-            Intent intent = new Intent(requireContext(), IndoorActivity.class);
-            startActivity(intent);
+            // Keep your existing screen (SSID/RSSI list) if wanted (commented out now)
+            //Intent intent = new Intent(requireContext(), IndoorActivity.class);
+            //startActivity(intent);
         });
     }
 
