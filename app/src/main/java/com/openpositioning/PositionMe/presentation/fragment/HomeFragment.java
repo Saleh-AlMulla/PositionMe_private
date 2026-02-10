@@ -288,6 +288,10 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 "Requesting indoor maps… (" + macs.size() + " APs)",
                 Toast.LENGTH_SHORT).show();
 
+        // DEBUG: confirm API key is actually present in BuildConfig
+        Log.d(TAG, "OPENPOSITIONING_API_KEY length=" +
+                (BuildConfig.OPENPOSITIONING_API_KEY == null ? 0 : BuildConfig.OPENPOSITIONING_API_KEY.trim().length()));
+
         floorplanApiClient.requestNearbyFloorplans(
                 BuildConfig.OPENPOSITIONING_API_KEY,
                 lat,

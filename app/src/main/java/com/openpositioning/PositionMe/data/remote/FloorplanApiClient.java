@@ -2,6 +2,8 @@ package com.openpositioning.PositionMe.data.remote;
 
 import androidx.annotation.NonNull;
 
+import com.openpositioning.PositionMe.BuildConfig;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -16,61 +18,67 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-/**
- * FloorplanApiClient
- * Calls: POST /api/live/floorplan/request/{api_key}
- * Body: { lat, lon, macs[] }
- */
-public final class FloorplanApiClient {
+public class FloorplanApiClient {
 
     public interface ResultCallback {
         void onSuccess(@NonNull String rawJson);
         void onError(@NonNull String message, @NonNull Exception e);
     }
 
-    private static final MediaType JSON
-            = MediaType.parse("application/json; charset=utf-8");
+    private static final String BASE_URL = "https://openpositioning.org";
+    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
-    private final OkHttpClient http = new OkHttpClient();
+    private final OkHttpClient client = new OkHttpClient();
 
+    /**
+     * Calls:
+     * POST https://openpositioning.org/api/live/floorplan/request/{api_key}/?key={master_key}
+     * body: { lat, lon, macs[] }
+     */
     public void requestNearbyFloorplans(
-            @NonNull String apiKey,
+            @NonNull String userApiKey,
             double lat,
             double lon,
             @NonNull List<String> macs,
             @NonNull ResultCallback cb
     ) {
         try {
-            String url = "https://openpositioning.org/api/live/floorplan/request/" + apiKey;
+            // Build JSON body exactly as the API expects
+            JSONObject body = new JSONObject();
+            body.put("lat", lat);
+            body.put("lon", lon);
 
-            JSONObject payload = new JSONObject();
-            payload.put("lat", lat);
-            payload.put("lon", lon);
+            JSONArray macArr = new JSONArray();
+            for (String m : macs) macArr.put(m);
+            body.put("macs", macArr);
 
-            JSONArray arr = new JSONArray();
-            for (String mac : macs) arr.put(mac);
-            payload.put("macs", arr);
-
-            RequestBody body = RequestBody.create(payload.toString(), JSON);
+            // IMPORTANT:
+            // - userApiKey is in the PATH
+            // - master key is the query param "key"
+            String url = BASE_URL
+                    + "/api/live/floorplan/request/"
+                    + userApiKey
+                    + "?key="
+                    + BuildConfig.OPENPOSITIONING_MASTER_KEY;
 
             Request req = new Request.Builder()
                     .url(url)
-                    .post(body)
+                    .post(RequestBody.create(body.toString(), JSON))
                     .addHeader("Accept", "application/json")
                     .build();
 
-            http.newCall(req).enqueue(new Callback() {
+            client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                    cb.onError("Floorplan request failed (network).", e);
+                    cb.onError("Floorplan request failed (network)", e);
                 }
 
                 @Override
                 public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                     String raw = response.body() != null ? response.body().string() : "";
                     if (!response.isSuccessful()) {
-                        cb.onError("Floorplan request failed (HTTP " + response.code() + ").",
-                                new IOException(raw));
+                        cb.onError("Floorplan request failed HTTP " + response.code() + ": " + raw,
+                                new IOException("HTTP " + response.code()));
                         return;
                     }
                     cb.onSuccess(raw);
@@ -78,7 +86,7 @@ public final class FloorplanApiClient {
             });
 
         } catch (Exception e) {
-            cb.onError("Floorplan request failed (payload/build).", e);
+            cb.onError("Floorplan request failed (client error)", e);
         }
     }
 }
