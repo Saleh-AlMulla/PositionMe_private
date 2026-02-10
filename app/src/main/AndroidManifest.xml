@@ -56,7 +56,6 @@
     <!-- Required if your app needs to access audio files that other apps created. -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-
     <!--
          3. requestLegacyExternalStorage:
             - Required on Android 10 if you need to maintain legacy external storage behavior.
@@ -74,6 +73,7 @@
         android:requestLegacyExternalStorage="true"
     >
 
+
     <activity
         android:name=".presentation.activity.ReplayActivity"
         android:exported="false" />
@@ -81,12 +81,15 @@
         android:name=".presentation.activity.RecordingActivity"
         android:exported="false" />
 
-    <!-- Google Maps API key metadata -->
+    <activity
+        android:name=".presentation.activity.IndoorActivity" />
+
+        <!-- Google Maps API key metadata -->
     <meta-data
         android:name="com.google.android.geo.API_KEY"
         android:value="@string/google_maps_key"/>
 
-    <activity
+        <activity
         android:name="com.openpositioning.PositionMe.presentation.activity.MainActivity"
         android:exported="true"
         android:configChanges="orientation"

@@ -30,6 +30,7 @@ import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.openpositioning.PositionMe.R;
 import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
+import com.openpositioning.PositionMe.presentation.activity.IndoorActivity;
 
 /**
  * A simple {@link Fragment} subclass. The home fragment is the start screen of the application.
@@ -51,6 +52,8 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
     private Button measurements;
     private Button files;
     private TextView gnssStatusTextView;
+    private MaterialButton indoorButton;
+
 
     // For the map
     private GoogleMap mMap;
@@ -114,6 +117,13 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         files.setOnClickListener(v -> {
             NavDirections action = HomeFragmentDirections.actionHomeFragmentToFilesFragment();
             Navigation.findNavController(v).navigate(action);
+        });
+
+        // Indoor button (Wi-Fi scan)
+        indoorButton = view.findViewById(R.id.indoorButton);
+        indoorButton.setOnClickListener(v -> {
+            Intent intent = new Intent(requireContext(), IndoorActivity.class);
+            startActivity(intent);
         });
 
         // TextView to display GNSS disabled message
