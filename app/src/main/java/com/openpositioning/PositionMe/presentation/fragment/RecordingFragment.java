@@ -60,8 +60,6 @@ public class RecordingFragment extends Fragment {
 
     // UI elements
     private MaterialButton completeButton, cancelButton;
-
-    private MaterialButton addTagButton;
     private ImageView recIcon;
     private ProgressBar timeRemaining;
     private TextView elevation, distanceTravelled, gnssError;
@@ -78,13 +76,6 @@ public class RecordingFragment extends Fragment {
     private float distance = 0f;
     private float previousPosX = 0f;
     private float previousPosY = 0f;
-
-    //Marker numberings
-    private int nextTestPointId = 1;
-
-    // relative timestamp baseline (ms since epoch at "recording start")
-    private long startTimestampMs = 0L;
-
 
     // References to the child map fragment
     private TrajectoryMapFragment trajectoryMapFragment;
@@ -125,9 +116,6 @@ public class RecordingFragment extends Fragment {
                               @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        if (startTimestampMs == 0L) startTimestampMs = System.currentTimeMillis();
-
-
         // Child Fragment: the container in fragment_recording.xml
         // where TrajectoryMapFragment is placed
         trajectoryMapFragment = (TrajectoryMapFragment)
@@ -151,8 +139,6 @@ public class RecordingFragment extends Fragment {
         cancelButton = view.findViewById(R.id.cancelButton);
         recIcon = view.findViewById(R.id.redDot);
         timeRemaining = view.findViewById(R.id.timeRemainingBar);
-        //Add button
-        addTagButton = view.findViewById(R.id.button_add_tag);
 
         // Hide or initialize default values
         gnssError.setVisibility(View.GONE);
@@ -166,22 +152,7 @@ public class RecordingFragment extends Fragment {
             sensorFusion.stopRecording();
             // Show Correction screen
             ((RecordingActivity) requireActivity()).showCorrectionScreen();
-
-
         });
-
-        addTagButton.setOnClickListener(v -> {
-            LatLng loc = trajectoryMapFragment.getCurrentLocation();
-            if (loc == null) return;
-            String label = String.valueOf(nextTestPointId++);
-            trajectoryMapFragment.addNumberedMarker(loc, label);
-            //Time
-            long relMs = System.currentTimeMillis() - startTimestampMs;
-            android.util.Log.d("AddTag",
-                    "label=" + label + " relMs=" + relMs +
-                            " lat=" + loc.latitude + " lon=" + loc.longitude);
-        });
-
 
 
         // Cancel button with confirmation dialog
