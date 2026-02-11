@@ -152,22 +152,38 @@
                 app:layout_rowWeight="1" />
         </androidx.gridlayout.widget.GridLayout>
 
-        <!-- Grey button for indoor positioning, anchored to the bottom. -->
+        <!-- Indoor venue selection button -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/indoorButton"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Indoor Positioning \n (In Development)"
+            android:text="Select Indoor Venue"
             android:textColor="@color/md_theme_onPrimary"
             android:backgroundTint="#9E9E9E"
             android:textSize="14sp"
             app:cornerRadius="14dp"
             app:layout_constraintTop_toBottomOf="@id/buttonGrid"
-            app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
+        <!-- Selected venue label (below the button) -->
+        <TextView
+            android:id="@+id/selectedVenueText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:padding="6dp"
+            android:text="Selected venue: None"
+            android:textSize="13sp"
+            android:textAlignment="center"
+            android:textColor="@color/md_theme_primary"
+            app:layout_constraintTop_toBottomOf="@id/indoorButton"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent" />
+
     </androidx.constraintlayout.widget.ConstraintLayout>
 </FrameLayout>
+

@@ -1,6 +1,6 @@
 **PositionMe** is an indoor positioning data collection application initially developed for the University of Edinburgh's Embedded Wireless course. The application now includes enhanced features, including **trajectory playback**, improved UI design, and comprehensive location tracking.
 
-## Features.
+## Features:
 
 - **Real-time Sensor Data Collection**: Captures sensor, location, and GNSS data.
 - **Trajectory Playback**: Simulates recorded movement from previously saved trajectory files (Trajectory proto files).
@@ -18,7 +18,7 @@
 - **Android Studio 4.2** or later
 - **Android SDK 30** or later
 
-## Installation
+## Installation:
 
 1. **Clone the repository.**
 2. **Open the project in Android Studio**.

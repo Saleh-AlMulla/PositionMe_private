@@ -32,8 +32,8 @@ import com.openpositioning.PositionMe.sensors.SensorTypes;
 import com.openpositioning.PositionMe.utils.UtilFunctions;
 import com.google.android.gms.maps.model.LatLng;
 
-
 /**
+ * avghdvh
  * Fragment responsible for managing the recording process of trajectory data.
  * <p>
  * The RecordingFragment serves as the interface for users to initiate, monitor, and
@@ -66,6 +66,9 @@ public class RecordingFragment extends Fragment {
     // UI elements
     private MaterialButton TestPointButton ;
     private MaterialButton completeButton, cancelButton;
+
+    private MaterialButton addTagButton;
+
     private ImageView recIcon;
     private ProgressBar timeRemaining;
     private TextView elevation, distanceTravelled, gnssError;
@@ -82,6 +85,12 @@ public class RecordingFragment extends Fragment {
     private float distance = 0f;
     private float previousPosX = 0f;
     private float previousPosY = 0f;
+
+    //Marker numberings
+    private int nextTestPointId = 1;
+
+    // relative timestamp baseline (ms since epoch at "recording start")
+    private long startTimestampMs = 0L;
 
     // References to the child map fragment
     private TrajectoryMapFragment trajectoryMapFragment;
@@ -106,6 +115,10 @@ public class RecordingFragment extends Fragment {
         Context context = requireActivity();
         this.settings = PreferenceManager.getDefaultSharedPreferences(context);
         this.refreshDataHandler = new Handler();
+
+        // UNIX timestamp (ms) marking the start of trajectory recording.
+        // All sub-message timestamps (including test_points) should be relative to this.
+        startTimestampMs = System.currentTimeMillis();
     }
 
     @Nullable
@@ -147,6 +160,7 @@ public class RecordingFragment extends Fragment {
         cancelButton = view.findViewById(R.id.cancelButton);
         recIcon = view.findViewById(R.id.redDot);
         timeRemaining = view.findViewById(R.id.timeRemainingBar);
+        addTagButton = view.findViewById(R.id.button_add_tag);
 
         //adding the test point button
         TestPointButton = view.findViewById(R.id.button_add_Test_Point);
@@ -202,6 +216,18 @@ public class RecordingFragment extends Fragment {
             });
 
             dialog.show(); // Finally, show the dialog
+        });
+
+        addTagButton.setOnClickListener(v -> {
+            LatLng loc = trajectoryMapFragment.getCurrentLocation();
+            if (loc == null) return;
+            String label = String.valueOf(nextTestPointId++);
+            trajectoryMapFragment.addNumberedMarker(loc, label);
+            //Time
+            long relMs = System.currentTimeMillis() - startTimestampMs;
+            android.util.Log.d("AddTag",
+                    "label=" + label + " relMs=" + relMs +
+                            " lat=" + loc.latitude + " lon=" + loc.longitude);
         });
 
         // The blinking effect for recIcon
