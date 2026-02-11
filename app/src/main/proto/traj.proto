@@ -12,6 +12,8 @@ repeated GNSS_Sample gnss_data = 7;
 repeated WiFi_Sample wifi_data = 8;
 repeated AP_Data aps_data = 9;
 
+
+
 // UNIX timestamp (in milliseconds) recorded from the start of this
 // trajectory data collection event. All future
 // timestamps in sub classes are to be RELATIVE timestamps

@@ -1,6 +1,9 @@
 package com.openpositioning.PositionMe.presentation.fragment;
 
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -226,6 +229,41 @@ public class TrajectoryMapFragment extends Fragment {
                 .width(5f)
                 .add() // start empty
         );
+    }
+
+    private BitmapDescriptor makeNumberedIcon(@NonNull String label) {
+        final int sizePx = 96;
+
+        Bitmap bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        circlePaint.setColor(Color.RED);
+        canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2.2f, circlePaint);
+
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTextSize(40f);
+
+
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        float textCenterY = (sizePx / 2f) - (fm.ascent + fm.descent) / 2f;
+
+        canvas.drawText(label, sizePx / 2f, textCenterY, textPaint);
+
+        return BitmapDescriptorFactory.fromBitmap(bitmap);
+    }
+
+    public void addNumberedMarker(@NonNull LatLng pos, @NonNull String label) {
+        if (gMap == null) return;
+
+        gMap.addMarker(new MarkerOptions()
+                .position(pos)
+                .icon(makeNumberedIcon(label))
+                .anchor(0.5f, 0.5f)
+                .flat(true)
+                .title("Test Point " + label));
     }
 
 
