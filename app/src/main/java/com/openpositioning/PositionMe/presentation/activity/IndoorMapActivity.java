@@ -118,7 +118,11 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
         venueOutline = extractOutlineLatLngs(venue);
         if (venueOutline != null && venueOutline.size() >= 3) {
             mMap.addPolygon(new PolygonOptions().addAll(venueOutline));
-            mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(venueOutline.get(0), 19f));
+            LatLng center = computeCentroid(venueOutline);
+            mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(center, 19f));
+
+            // optional: slight upward shift because your floor selector bar is at the top
+            mMap.animateCamera(CameraUpdateFactory.scrollBy(0f, -120f));
         }
 
         // 2) Parse map_shapes into floor->list of polygons
@@ -435,5 +439,18 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
         }
         return pts.size() >= 3 ? pts : null;
     }
+
+    @NonNull
+    private LatLng computeCentroid(@NonNull List<LatLng> pts) {
+        double lat = 0.0;
+        double lon = 0.0;
+        for (LatLng p : pts) {
+            lat += p.latitude;
+            lon += p.longitude;
+        }
+        return new LatLng(lat / pts.size(), lon / pts.size());
+    }
+
 }
+
 

@@ -42,7 +42,6 @@ import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
 import com.openpositioning.PositionMe.utils.IndoorSelectionStore;
 import com.openpositioning.PositionMe.presentation.activity.IndoorMapActivity;
 
-
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.Polygon;
 import com.google.android.gms.maps.model.PolygonOptions;
@@ -63,6 +62,10 @@ import java.util.Set;
  * - Hub screen for navigation
  * - Shows Google Map + GNSS status
  * - Step (d): requests nearby indoor floorplans using LIVE location + LIVE observed Wi-Fi AP MACs
+ *
+ * UX additions:
+ * - Shows currently selected indoor venue under the "Select Indoor Venue" button.
+ * - Optionally blocks Recording if no venue is selected (easy to switch off).
  */
 public class HomeFragment extends Fragment implements OnMapReadyCallback {
 
@@ -73,6 +76,9 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
     private Button files;
     private TextView gnssStatusTextView;
     private MaterialButton indoorButton;
+
+    // UX: selected venue label (TextView you added in fragment_home.xml)
+    private TextView selectedVenueTextView;
 
     // For the map
     private GoogleMap mMap;
@@ -129,7 +135,23 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         start.setEnabled(!PreferenceManager.getDefaultSharedPreferences(getContext())
                 .getBoolean("permanentDeny", false));
         start.setOnClickListener(v -> {
+
+            // UX/assignment-safe: require venue selection before recording.
+            // If you don't want to hard-block, delete this block or change to a warning toast only.
+            String venueId = IndoorSelectionStore.getSelectedVenueId(requireContext());
+            if (venueId == null || venueId.trim().isEmpty()) {
+                Toast.makeText(requireContext(),
+                        "Select an indoor venue first (tap a building outline).",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+
             Intent intent = new Intent(requireContext(), RecordingActivity.class);
+
+            // Optional: pass selection forward for the teammate working on protobuf upload tagging.
+            intent.putExtra("selected_venue_id", venueId);
+            intent.putExtra("selected_venue_name", IndoorSelectionStore.getSelectedVenueName(requireContext()));
+
             startActivity(intent);
             ((AppCompatActivity) getActivity()).getSupportActionBar().hide();
         });
@@ -150,6 +172,14 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
 
         // TextView to display GNSS disabled message
         gnssStatusTextView = view.findViewById(R.id.gnssStatusTextView);
+
+        // UX: selected venue label under indoor button
+        selectedVenueTextView = view.findViewById(R.id.selectedVenueText);
+
+        // Fresh app session: don't show a stale previously-selected venue.
+        IndoorSelectionStore.clear(requireContext());
+
+        updateSelectedVenueLabel();
 
         // Map fragment
         mapFragment = (SupportMapFragment)
@@ -181,6 +211,23 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
     public void onResume() {
         super.onResume();
         checkAndUpdatePermissions();
+
+        // When returning from IndoorMapActivity, refresh the label so it shows the latest selection.
+        updateSelectedVenueLabel();
+    }
+
+    /**
+     * Updates the "Selected venue: ..." label under the indoor button.
+     */
+    private void updateSelectedVenueLabel() {
+        if (selectedVenueTextView == null) return;
+
+        String venueName = IndoorSelectionStore.getSelectedVenueName(requireContext());
+        if (venueName == null || venueName.trim().isEmpty()) {
+            selectedVenueTextView.setText("Selected venue: None");
+        } else {
+            selectedVenueTextView.setText("Selected venue: " + venueName);
+        }
     }
 
     /**
@@ -244,6 +291,9 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
      * We do NOT use getLastKnownLocation() anymore, because it can be stale even when the blue dot looks correct.
      */
     private void requestNearbyIndoorMaps() {
+
+        // Clear previous selection before requesting new indoor venues
+        IndoorSelectionStore.clear(requireContext());
 
         boolean fineGranted = ActivityCompat.checkSelfPermission(
                 requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
@@ -497,21 +547,18 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
 
                 IndoorSelectionStore.saveSelectedVenue(requireContext(), venueId, venueName, venue);
 
+                // Update the Home screen label immediately (even before you return from the indoor map).
+                updateSelectedVenueLabel();
+
                 Log.d(TAG, "Saved selected venue. id=" + venueId + " name=" + venueName);
-                Log.d(TAG, "Selected venue JSON: " + venue.toString());
-                Log.d(TAG, "Venue keys: " + venue.names());
-                Log.d(TAG, "map_shapes present? " + venue.has("map_shapes"));
-                Log.d(TAG, "floors present? " + venue.has("floors"));
-                Log.d(TAG, "floorplans present? " + venue.has("floorplans"));
 
-
-                Toast.makeText(requireContext(), "Selected venue: " + venueName, Toast.LENGTH_LONG).show();
+                IndoorSelectionStore.saveSelectedVenue(requireContext(), venueId, venueName, venue);
+                updateSelectedVenueLabel();
 
                 // Open full-screen indoor map (Step 4B)
                 Intent intent = new Intent(requireContext(), IndoorMapActivity.class);
                 startActivity(intent);
             });
-
 
             if (drawnCount == 0) {
                 Toast.makeText(requireContext(),
@@ -676,9 +723,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         return null;
     }
 
-
-
-
     @Nullable
     private List<LatLng> parseGeoJsonPolygon(@Nullable JSONArray coordinates) {
         if (coordinates == null) return null;
@@ -807,7 +851,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         return pts.size() >= 3 ? pts : null;
     }
 
-
     // -----------------------------------------------------------------------------------------
     // Old last-known helper (no longer used). Kept for now so i can compare/remove later.
     // -----------------------------------------------------------------------------------------
@@ -832,5 +875,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         return best;
     }
 }
+
 
 
