@@ -32,6 +32,7 @@ import com.openpositioning.PositionMe.presentation.fragment.HomeFragment;
 import com.openpositioning.PositionMe.presentation.fragment.SettingsFragment;
 import com.openpositioning.PositionMe.sensors.Observer;
 import com.openpositioning.PositionMe.sensors.SensorFusion;
+import com.openpositioning.PositionMe.service.SensorCollectionService;
 import com.openpositioning.PositionMe.utils.PermissionManager;
 
 
@@ -124,14 +125,24 @@ public class MainActivity extends AppCompatActivity implements Observer {
                     boolean locationGranted = result.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false);
                     boolean activityGranted = result.getOrDefault(Manifest.permission.ACTIVITY_RECOGNITION, false);
 
+                    // Core permissions (location + activity) are essential
                     if (locationGranted && activityGranted) {
-                        // Both permissions granted
                         allPermissionsObtained();
                     } else {
-                        // Permission denied
                         Toast.makeText(this,
                                 "Location or Physical Activity permission denied. Some features may not work.",
                                 Toast.LENGTH_LONG).show();
+                    }
+
+                    // BLE permissions are non-blocking; warn if denied
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        boolean bleScan = result.getOrDefault(Manifest.permission.BLUETOOTH_SCAN, true);
+                        boolean bleConn = result.getOrDefault(Manifest.permission.BLUETOOTH_CONNECT, true);
+                        if (!bleScan || !bleConn) {
+                            Toast.makeText(this,
+                                    "Bluetooth permission denied. BLE scanning will be unavailable.",
+                                    Toast.LENGTH_SHORT).show();
+                        }
                     }
                 }
         );
@@ -145,14 +156,15 @@ public class MainActivity extends AppCompatActivity implements Observer {
 
     /**
      * {@inheritDoc}
+     * Stops sensor listeners when the activity pauses, unless the foreground service is running
+     * (i.e. a recording is in progress and sensors must continue in the background).
      */
     @Override
     public void onPause() {
         super.onPause();
 
-        //Ensure sensorFusion has been initialised before unregistering listeners
-        if(sensorFusion != null) {
-//            sensorFusion.stopListening();
+        if (sensorFusion != null && !SensorCollectionService.isRunning()) {
+            sensorFusion.stopListening();
         }
     }
 
@@ -184,14 +196,38 @@ public class MainActivity extends AppCompatActivity implements Observer {
                         this, Manifest.permission.ACTIVITY_RECOGNITION
                 ) == PackageManager.PERMISSION_GRANTED;
 
-                if (!locationGranted || !activityGranted) {
-                    // Request both permissions using ActivityResultLauncher
-                    multiplePermissionsLauncher.launch(new String[]{
-                            Manifest.permission.ACCESS_FINE_LOCATION
-                    });
-                    multiplePermissionsLauncher.launch(new String[]{
-                            Manifest.permission.ACTIVITY_RECOGNITION
-                    });
+                // BLE permissions (Android 12+)
+                boolean bleGranted = true;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    bleGranted = ContextCompat.checkSelfPermission(
+                            MainActivity.this, Manifest.permission.BLUETOOTH_SCAN
+                    ) == PackageManager.PERMISSION_GRANTED
+                    && ContextCompat.checkSelfPermission(
+                            MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT
+                    ) == PackageManager.PERMISSION_GRANTED;
+                }
+
+                // Notification permission (Android 13+)
+                boolean notifGranted = true;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notifGranted = ContextCompat.checkSelfPermission(
+                            MainActivity.this, Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED;
+                }
+
+                if (!locationGranted || !activityGranted || !bleGranted || !notifGranted) {
+                    // Build a list of permissions that still need to be requested
+                    java.util.List<String> permsToRequest = new java.util.ArrayList<>();
+                    if (!locationGranted) permsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
+                    if (!activityGranted) permsToRequest.add(Manifest.permission.ACTIVITY_RECOGNITION);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !bleGranted) {
+                        permsToRequest.add(Manifest.permission.BLUETOOTH_SCAN);
+                        permsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT);
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifGranted) {
+                        permsToRequest.add(Manifest.permission.POST_NOTIFICATIONS);
+                    }
+                    multiplePermissionsLauncher.launch(permsToRequest.toArray(new String[0]));
                 } else {
                     // Both permissions are already granted
                     allPermissionsObtained();
@@ -211,16 +247,16 @@ public class MainActivity extends AppCompatActivity implements Observer {
 
 
     /**
-     * Unregisters sensor listeners when the app closes. Not in {@link MainActivity#onPause()} to
-     * enable recording data with a locked screen.
+     * Unregisters sensor listeners when the app closes, unless the foreground service is active
+     * (recording in progress).
      *
      * @see SensorFusion the main data processing class.
+     * @see SensorCollectionService
      */
     @Override
     protected void onDestroy() {
-        if (sensorFusion != null) {
-//            sensorFusion.stopListening(); // suspended due to the need to record data with
-//                                             a locked screen or cross activity
+        if (sensorFusion != null && !SensorCollectionService.isRunning()) {
+            sensorFusion.stopListening();
         }
         super.onDestroy();
     }

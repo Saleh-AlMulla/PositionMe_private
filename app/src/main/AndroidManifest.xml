@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.openpositioning.PositionMe">
 
     <!--
@@ -35,6 +36,20 @@
     <!-- Location -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+
+    <!-- Bluetooth (BLE scanning, Android 12+ requires BLUETOOTH_SCAN and BLUETOOTH_CONNECT) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Notifications (Android 13+ requires POST_NOTIFICATIONS for foreground service notification) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Foreground Service (required for background data collection) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <!-- Internet -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -84,7 +99,7 @@
     <!-- Google Maps API key metadata -->
     <meta-data
         android:name="com.google.android.geo.API_KEY"
-        android:value="@string/google_maps_key"/>
+        android:value="AIzaSyBwFMzduNUH5ekN0NJllLh72u28teUvcGo"/>
 
     <activity
         android:name="com.openpositioning.PositionMe.presentation.activity.MainActivity"
@@ -96,6 +111,12 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
     </activity>
+
+    <!-- Foreground service for background sensor data collection during recording -->
+    <service
+        android:name=".service.SensorCollectionService"
+        android:exported="false"
+        android:foregroundServiceType="location" />
 
 </application>
 

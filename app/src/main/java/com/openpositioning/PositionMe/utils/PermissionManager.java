@@ -59,10 +59,20 @@ public class PermissionManager {
         requiredPermissions.add(Manifest.permission.CHANGE_WIFI_STATE);
         // For API < 29, also request broad storage permissions
         // For API >= 29, also request ACTIVITY_RECOGNITION
-        // (We can do the check here or just always add them; the OS will skip as needed.)
         requiredPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
         requiredPermissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
         requiredPermissions.add(Manifest.permission.ACTIVITY_RECOGNITION);
+
+        // BLE permissions (Android 12+ / API 31+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            requiredPermissions.add(Manifest.permission.BLUETOOTH_SCAN);
+            requiredPermissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+        }
+
+        // Notification permission (Android 13+ / API 33+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requiredPermissions.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
     }
 
     /**

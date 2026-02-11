@@ -20,6 +20,9 @@ public class BuildingPolygon {
     // North-East and South-West Coordinates for the Kenneth and Murray Library Building
     public static final LatLng LIBRARY_NE=new LatLng(55.92306692576906, -3.174771893078224);
     public static final LatLng LIBRARY_SW=new LatLng(55.92281045664704, -3.175184089079065);
+    // North-East and South-West Coordinates for Murchison House
+    public static final LatLng MURCHISON_NE=new LatLng(55.92240, -3.17150);
+    public static final LatLng MURCHISON_SW=new LatLng(55.92170, -3.17280);
     // Boundary coordinates of the Nucleus building (clockwise)
 
     public static final List<LatLng> NUCLEUS_POLYGON = new ArrayList<LatLng>() {{
@@ -34,6 +37,13 @@ public class BuildingPolygon {
         add(new LatLng(BuildingPolygon.LIBRARY_SW.latitude,BuildingPolygon.LIBRARY_NE.longitude));//(South-East)
         add(BuildingPolygon.LIBRARY_SW);
         add(new LatLng(BuildingPolygon.LIBRARY_NE.latitude,BuildingPolygon.LIBRARY_SW.longitude));//(North-West)
+    }};
+    //Boundary coordinates of the Murchison House building (clockwise)
+    public static final List<LatLng> MURCHISON_POLYGON = new ArrayList<LatLng>() {{
+        add(BuildingPolygon.MURCHISON_NE);
+        add(new LatLng(BuildingPolygon.MURCHISON_SW.latitude, BuildingPolygon.MURCHISON_NE.longitude));
+        add(BuildingPolygon.MURCHISON_SW);
+        add(new LatLng(BuildingPolygon.MURCHISON_NE.latitude, BuildingPolygon.MURCHISON_SW.longitude));
     }};
 
     /**
@@ -55,6 +65,15 @@ public class BuildingPolygon {
     }
 
     /**
+     * Function to check if a point is in Murchison House
+     * @param point the point to be checked if inside the building
+     * @return True if point is in Murchison House else False
+     */
+    public static boolean inMurchison(LatLng point){
+        return (pointInPolygon(point, MURCHISON_POLYGON));
+    }
+
+    /**
      * Function to check if point in polygon (approximates earth to be flat)
      * Ray casting algorithm https://en.wikipedia.org/wiki/Point_in_polygon
      * @param point point to be checked if in polygon
@@ -62,7 +81,7 @@ public class BuildingPolygon {
      * @return True if point in polygon
      * False otherwise
      */
-    private static boolean pointInPolygon(LatLng point, List<LatLng> polygon) {
+    public static boolean pointInPolygon(LatLng point, List<LatLng> polygon) {
         int numCrossings = 0;
         List<LatLng> path=polygon;
         // For each edge

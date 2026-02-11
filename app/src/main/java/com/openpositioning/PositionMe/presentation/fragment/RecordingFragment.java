@@ -32,6 +32,13 @@ import com.openpositioning.PositionMe.sensors.SensorTypes;
 import com.openpositioning.PositionMe.utils.UtilFunctions;
 import com.google.android.gms.maps.model.LatLng;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import android.widget.Toast;
+
+
+
 
 /**
  * Fragment responsible for managing the recording process of trajectory data.
@@ -139,6 +146,8 @@ public class RecordingFragment extends Fragment {
         cancelButton = view.findViewById(R.id.cancelButton);
         recIcon = view.findViewById(R.id.redDot);
         timeRemaining = view.findViewById(R.id.timeRemainingBar);
+        view.findViewById(R.id.btn_test_point).setOnClickListener(v -> onAddTestPoint());
+
 
         // Hide or initialize default values
         gnssError.setVisibility(View.GONE);
@@ -210,6 +219,34 @@ public class RecordingFragment extends Fragment {
             refreshDataHandler.post(refreshDataTask);
         }
     }
+
+    private void onAddTestPoint() {
+        // 1) Ensure the map fragment is ready
+        if (trajectoryMapFragment == null) return;
+
+        // 2) Read current track position (must lie on the current path)
+        LatLng cur = trajectoryMapFragment.getCurrentLocation();
+        if (cur == null) {
+            Toast.makeText(requireContext(), "" +
+                    "I haven't gotten my current location yet, let me take a couple of steps/wait for the map to load.",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 3) Generate index + timestamp (satisfies "save timestamp")
+        int idx = ++testPointIndex;
+        long ts = System.currentTimeMillis();
+
+        // 4) Keep a local copy for in-session tracking
+        testPoints.add(new TestPoint(idx, ts, cur.latitude, cur.longitude));
+
+        // Write test point into protobuf payload
+        sensorFusion.addTestPointToProto(ts, cur.latitude, cur.longitude);
+
+        // 5) Draw numbered marker on map (satisfies "leave numbered marker")
+        trajectoryMapFragment.addTestPointMarker(idx, ts, cur);
+    }
+
 
     /**
      * Update the UI with sensor data and pass map updates to TrajectoryMapFragment.
@@ -295,4 +332,24 @@ public class RecordingFragment extends Fragment {
             refreshDataHandler.postDelayed(refreshDataTask, 500);
         }
     }
+
+    private int testPointIndex = 0;
+
+    private static class TestPoint {
+        final int index;
+        final long timestampMs;
+        final double lat;
+        final double lng;
+
+        TestPoint(int index, long timestampMs, double lat, double lng) {
+            this.index = index;
+            this.timestampMs = timestampMs;
+            this.lat = lat;
+            this.lng = lng;
+        }
+    }
+
+    private final List<TestPoint> testPoints = new ArrayList<>();
+
+
 }

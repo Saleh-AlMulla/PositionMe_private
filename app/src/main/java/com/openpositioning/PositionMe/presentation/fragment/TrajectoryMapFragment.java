@@ -2,6 +2,9 @@ package com.openpositioning.PositionMe.presentation.fragment;
 
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -10,6 +13,7 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.Spinner;
+import android.widget.TextView;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import androidx.annotation.NonNull;
@@ -57,6 +61,9 @@ public class TrajectoryMapFragment extends Fragment {
     private LatLng currentLocation; // Stores the user's current location
     private Marker orientationMarker; // Marker representing user's heading
     private Marker gnssMarker; // GNSS position marker
+    // Keep test point markers so they can be cleared when recording ends
+    private final List<Marker> testPointMarkers = new ArrayList<>();
+
     private Polyline polyline; // Polyline representing user's movement path
     private boolean isRed = true; // Tracks whether the polyline color is red
     private boolean isGnssOn = false; // Tracks if GNSS tracking is enabled
@@ -70,6 +77,14 @@ public class TrajectoryMapFragment extends Fragment {
     private IndoorMapManager indoorMapManager; // Manages indoor mapping
     private SensorFusion sensorFusion;
 
+    // Auto-floor state
+    private static final String TAG = "TrajectoryMapFragment";
+    private static final long AUTO_FLOOR_DEBOUNCE_MS = 3000;
+    private static final long AUTO_FLOOR_CHECK_INTERVAL_MS = 1000;
+    private Handler autoFloorHandler;
+    private Runnable autoFloorTask;
+    private int lastCandidateFloor = Integer.MIN_VALUE;
+    private long lastCandidateTime = 0;
 
     // UI
     private Spinner switchMapSpinner;
@@ -78,6 +93,7 @@ public class TrajectoryMapFragment extends Fragment {
     private SwitchMaterial autoFloorSwitch;
 
     private com.google.android.material.floatingactionbutton.FloatingActionButton floorUpButton, floorDownButton;
+    private TextView floorLabel;
     private Button switchColorButton;
     private Polygon buildingPolygon;
 
@@ -106,6 +122,7 @@ public class TrajectoryMapFragment extends Fragment {
         autoFloorSwitch = view.findViewById(R.id.autoFloor);
         floorUpButton   = view.findViewById(R.id.floorUpButton);
         floorDownButton = view.findViewById(R.id.floorDownButton);
+        floorLabel      = view.findViewById(R.id.floorLabel);
         switchColorButton = view.findViewById(R.id.lineColorButton);
 
         // Setup floor up/down UI hidden initially until we know there's an indoor map
@@ -166,13 +183,14 @@ public class TrajectoryMapFragment extends Fragment {
             }
         });
 
-        // Floor up/down logic
+        // Auto-floor toggle: start/stop periodic floor evaluation
+        sensorFusion = SensorFusion.getInstance();
         autoFloorSwitch.setOnCheckedChangeListener((compoundButton, isChecked) -> {
-
-            //TODO - fix the sensor fusion method to get the elevation (cannot get it from the current method)
-//            float elevationVal = sensorFusion.getElevation();
-//            indoorMapManager.setCurrentFloor((int)(elevationVal/indoorMapManager.getFloorHeight())
-//                    ,true);
+            if (isChecked) {
+                startAutoFloor();
+            } else {
+                stopAutoFloor();
+            }
         });
 
         floorUpButton.setOnClickListener(v -> {
@@ -180,6 +198,7 @@ public class TrajectoryMapFragment extends Fragment {
             autoFloorSwitch.setChecked(false);
             if (indoorMapManager != null) {
                 indoorMapManager.increaseFloor();
+                updateFloorLabel();
             }
         });
 
@@ -187,6 +206,7 @@ public class TrajectoryMapFragment extends Fragment {
             autoFloorSwitch.setChecked(false);
             if (indoorMapManager != null) {
                 indoorMapManager.decreaseFloor();
+                updateFloorLabel();
             }
         });
     }
@@ -314,11 +334,26 @@ public class TrajectoryMapFragment extends Fragment {
         }
 
         // Extend polyline if movement occurred
-        if (oldLocation != null && !oldLocation.equals(newLocation) && polyline != null) {
+        /*if (oldLocation != null && !oldLocation.equals(newLocation) && polyline != null) {
             List<LatLng> points = new ArrayList<>(polyline.getPoints());
             points.add(newLocation);
             polyline.setPoints(points);
+        }*/
+        // Extend polyline
+        if (polyline != null) {
+            List<LatLng> points = new ArrayList<>(polyline.getPoints());
+
+            // First position fix: add the first polyline point
+            if (oldLocation == null) {
+                points.add(newLocation);
+                polyline.setPoints(points);
+            } else if (!oldLocation.equals(newLocation)) {
+                // Subsequent movement: append a new polyline point
+                points.add(newLocation);
+                polyline.setPoints(points);
+            }
         }
+
 
         // Update indoor map overlay
         if (indoorMapManager != null) {
@@ -358,6 +393,25 @@ public class TrajectoryMapFragment extends Fragment {
     public LatLng getCurrentLocation() {
         return currentLocation;
     }
+
+    /**
+     * Add a numbered test point marker on the map.
+     * Called by RecordingFragment when user presses the "Test Point" button.
+     */
+    public void addTestPointMarker(int index, long timestampMs, @NonNull LatLng position) {
+        if (gMap == null) return;
+
+        Marker m = gMap.addMarker(new MarkerOptions()
+                .position(position)
+                .title("TP " + index)
+                .snippet("t=" + timestampMs));
+
+        if (m != null) {
+            m.showInfoWindow(); // Show TP index immediately
+            testPointMarkers.add(m);
+        }
+    }
+
 
     /**
      * Called when we want to set or update the GNSS marker position
@@ -409,10 +463,27 @@ public class TrajectoryMapFragment extends Fragment {
     private void setFloorControlsVisibility(int visibility) {
         floorUpButton.setVisibility(visibility);
         floorDownButton.setVisibility(visibility);
+        floorLabel.setVisibility(visibility);
         autoFloorSwitch.setVisibility(visibility);
+        if (visibility == View.VISIBLE) {
+            updateFloorLabel();
+        }
+    }
+
+    /**
+     * Updates the floor label text to reflect the current floor display name.
+     */
+    private void updateFloorLabel() {
+        if (floorLabel != null && indoorMapManager != null) {
+            floorLabel.setText(indoorMapManager.getCurrentFloorDisplayName());
+        }
     }
 
     public void clearMapAndReset() {
+        stopAutoFloor();
+        if (autoFloorSwitch != null) {
+            autoFloorSwitch.setChecked(false);
+        }
         if (polyline != null) {
             polyline.remove();
             polyline = null;
@@ -431,6 +502,13 @@ public class TrajectoryMapFragment extends Fragment {
         }
         lastGnssLocation = null;
         currentLocation  = null;
+
+        // Clear test point markers
+        for (Marker m : testPointMarkers) {
+            m.remove();
+        }
+        testPointMarkers.clear();
+
 
         // Re-create empty polylines with your chosen colors
         if (gMap != null) {
@@ -534,8 +612,112 @@ public class TrajectoryMapFragment extends Fragment {
         gMap.addPolygon(buildingPolygonOptions2);
         gMap.addPolygon(buildingPolygonOptions3);
         gMap.addPolygon(buildingPolygonOptions4);
-        Log.d("TrajectoryMapFragment", "Building polygon added, vertex count: " + buildingPolygon.getPoints().size());
+        Log.d(TAG, "Building polygon added, vertex count: " + buildingPolygon.getPoints().size());
     }
 
+    //region Auto-floor logic
 
+    /**
+     * Starts the periodic auto-floor evaluation task. Checks every second
+     * and applies floor changes only after the debounce window (3 seconds
+     * of consistent readings).
+     */
+    private void startAutoFloor() {
+        if (autoFloorHandler == null) {
+            autoFloorHandler = new Handler(Looper.getMainLooper());
+        }
+        lastCandidateFloor = Integer.MIN_VALUE;
+        lastCandidateTime = 0;
+
+        // Immediately jump to the best-guess floor (skip debounce on first toggle)
+        applyImmediateFloor();
+
+        autoFloorTask = new Runnable() {
+            @Override
+            public void run() {
+                evaluateAutoFloor();
+                autoFloorHandler.postDelayed(this, AUTO_FLOOR_CHECK_INTERVAL_MS);
+            }
+        };
+        autoFloorHandler.post(autoFloorTask);
+        Log.d(TAG, "Auto-floor started");
+    }
+
+    /**
+     * Applies the best-guess floor immediately without debounce.
+     * Called once when auto-floor is first toggled on, so the user
+     * sees an instant correction after manually browsing wrong floors.
+     */
+    private void applyImmediateFloor() {
+        if (sensorFusion == null || indoorMapManager == null) return;
+        if (!indoorMapManager.getIsIndoorMapSet()) return;
+
+        int candidateFloor;
+        if (sensorFusion.getLatLngWifiPositioning() != null) {
+            candidateFloor = sensorFusion.getWifiFloor();
+        } else {
+            float elevation = sensorFusion.getElevation();
+            float floorHeight = indoorMapManager.getFloorHeight();
+            if (floorHeight <= 0) return;
+            candidateFloor = Math.round(elevation / floorHeight);
+        }
+
+        indoorMapManager.setCurrentFloor(candidateFloor, true);
+        updateFloorLabel();
+        // Seed the debounce state so subsequent checks don't re-trigger immediately
+        lastCandidateFloor = candidateFloor;
+        lastCandidateTime = SystemClock.elapsedRealtime();
+    }
+
+    /**
+     * Stops the periodic auto-floor evaluation and resets debounce state.
+     */
+    private void stopAutoFloor() {
+        if (autoFloorHandler != null && autoFloorTask != null) {
+            autoFloorHandler.removeCallbacks(autoFloorTask);
+        }
+        lastCandidateFloor = Integer.MIN_VALUE;
+        lastCandidateTime = 0;
+        Log.d(TAG, "Auto-floor stopped");
+    }
+
+    /**
+     * Evaluates the current floor using WiFi positioning (priority) or
+     * barometric elevation (fallback). Applies a 3-second debounce window
+     * to prevent jittery floor switching.
+     */
+    private void evaluateAutoFloor() {
+        if (sensorFusion == null || indoorMapManager == null) return;
+        if (!indoorMapManager.getIsIndoorMapSet()) return;
+
+        int candidateFloor;
+
+        // Priority 1: WiFi-based floor (only if WiFi positioning has returned data)
+        if (sensorFusion.getLatLngWifiPositioning() != null) {
+            candidateFloor = sensorFusion.getWifiFloor();
+        } else {
+            // Fallback: barometric elevation estimate
+            float elevation = sensorFusion.getElevation();
+            float floorHeight = indoorMapManager.getFloorHeight();
+            if (floorHeight <= 0) return;
+            candidateFloor = Math.round(elevation / floorHeight);
+        }
+
+        // Debounce: require the same floor reading for AUTO_FLOOR_DEBOUNCE_MS
+        long now = SystemClock.elapsedRealtime();
+        if (candidateFloor != lastCandidateFloor) {
+            lastCandidateFloor = candidateFloor;
+            lastCandidateTime = now;
+            return;
+        }
+
+        if (now - lastCandidateTime >= AUTO_FLOOR_DEBOUNCE_MS) {
+            indoorMapManager.setCurrentFloor(candidateFloor, true);
+            updateFloorLabel();
+            // Reset timer so we don't keep re-applying the same floor
+            lastCandidateTime = now;
+        }
+    }
+
+    //endregion
 }
