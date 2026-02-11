@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-        <string name="google_maps_key" translatable="false" templateMergeStrategy="preserve">
-        AIzaSyDpqAZm2BYnY_tRWwyRQlhleBeU9i_zPWA
+    <string
+        name="google_maps_key"
+        translatable="false"
+        templateMergeStrategy="preserve">
+        @string/google_maps_key
     </string>
 </resources>
