@@ -40,6 +40,8 @@ import com.openpositioning.PositionMe.R;
 import com.openpositioning.PositionMe.data.remote.FloorplanApiClient;
 import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
 import com.openpositioning.PositionMe.utils.IndoorSelectionStore;
+import com.openpositioning.PositionMe.presentation.activity.IndoorMapActivity;
+
 
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.Polygon;
@@ -488,24 +490,28 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 String venueName = extractVenueName(venue);
                 String venueId = extractVenueIdBestEffort(venue);
 
-                //API returns id=null for murchison_house, so use name as stable id
-                if (venueId == null || venueId.trim().isEmpty()) {
-                    venueId = venue.optString("name", null);  // e.g., "murchison_house"
+                // API returned id=null for murchison_house, so use "name" as a stable id
+                if (venueId == null || venueId.trim().isEmpty() || "null".equalsIgnoreCase(venueId.trim())) {
+                    venueId = venue.optString("name", null);
                 }
 
                 IndoorSelectionStore.saveSelectedVenue(requireContext(), venueId, venueName, venue);
 
-                Intent intent = new Intent(requireContext(), com.openpositioning.PositionMe.presentation.activity.IndoorMapActivity.class);
-                startActivity(intent);
-
-
-                Toast.makeText(requireContext(),
-                        "Selected venue: " + venueName,
-                        Toast.LENGTH_LONG).show();
-
                 Log.d(TAG, "Saved selected venue. id=" + venueId + " name=" + venueName);
                 Log.d(TAG, "Selected venue JSON: " + venue.toString());
+                Log.d(TAG, "Venue keys: " + venue.names());
+                Log.d(TAG, "map_shapes present? " + venue.has("map_shapes"));
+                Log.d(TAG, "floors present? " + venue.has("floors"));
+                Log.d(TAG, "floorplans present? " + venue.has("floorplans"));
+
+
+                Toast.makeText(requireContext(), "Selected venue: " + venueName, Toast.LENGTH_LONG).show();
+
+                // Open full-screen indoor map (Step 4B)
+                Intent intent = new Intent(requireContext(), IndoorMapActivity.class);
+                startActivity(intent);
             });
+
 
             if (drawnCount == 0) {
                 Toast.makeText(requireContext(),

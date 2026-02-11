@@ -15,7 +15,7 @@ import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
-import com.google.android.gms.maps.model.LatLngBounds;
+import com.google.android.gms.maps.model.Polygon;
 import com.google.android.gms.maps.model.PolygonOptions;
 import com.openpositioning.PositionMe.R;
 import com.openpositioning.PositionMe.utils.IndoorSelectionStore;
@@ -24,28 +24,30 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCallback {
 
     private static final String TAG = "IndoorMapActivity";
 
     private GoogleMap mMap;
-
     private JSONObject venue;
 
     private TextView tvFloor;
-    private Button btnDown, btnUp;
+    private Button down, up;
 
-    // Floors discovered from map_shapes
+    // Floors discovered from map_shapes (ordered)
     private final List<String> floors = new ArrayList<>();
     private int floorIndex = 0;
 
-    // floor -> list of polygons (each polygon is list of LatLng)
-    private final HashMap<String, List<List<LatLng>>> floorToPolygons = new HashMap<>();
+    // We keep drawn polygons so we can clear/redraw on floor change
+    private final List<Polygon> drawnFloorPolys = new ArrayList<>();
+
+    // Outline points for zooming
+    private List<LatLng> venueOutline;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -53,10 +55,10 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
         setContentView(R.layout.activity_indoor_map);
 
         tvFloor = findViewById(R.id.tvFloor);
-        btnDown = findViewById(R.id.btnFloorDown);
-        btnUp = findViewById(R.id.btnFloorUp);
+        down = findViewById(R.id.btnFloorDown);
+        up = findViewById(R.id.btnFloorUp);
 
-        // Load selected venue from SharedPreferences (Step 4A)
+        // Load last selected venue
         String venueJson = IndoorSelectionStore.getSelectedVenueJson(this);
         if (venueJson == null || venueJson.trim().isEmpty()) {
             Toast.makeText(this, "No venue selected. Go back and tap a building.", Toast.LENGTH_LONG).show();
@@ -73,31 +75,12 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
             return;
         }
 
-        String name = venue.optString("name", "Indoor Venue");
-        setTitle("Indoor: " + name);
+        Log.d(TAG, "Venue keys in IndoorMapActivity: " + venue.names());
+        Object ms = venue.opt("map_shapes");
+        Log.d(TAG, "map_shapes type in IndoorMapActivity: " +
+                (ms == null ? "null" : ms.getClass().getSimpleName()));
 
-        // Parse map_shapes now (even before map is ready)
-        parseMapShapesIntoFloors(venue);
-
-        btnDown.setOnClickListener(v -> {
-            if (floors.isEmpty()) return;
-            if (floorIndex > 0) {
-                floorIndex--;
-                updateFloorLabel();
-                redrawCurrentFloor();
-            }
-        });
-
-        btnUp.setOnClickListener(v -> {
-            if (floors.isEmpty()) return;
-            if (floorIndex < floors.size() - 1) {
-                floorIndex++;
-                updateFloorLabel();
-                redrawCurrentFloor();
-            }
-        });
-
-        updateFloorLabel();
+        setTitle("Indoor: " + venue.optString("name", "Venue"));
 
         SupportMapFragment mapFragment =
                 (SupportMapFragment) getSupportFragmentManager().findFragmentById(R.id.indoorMap);
@@ -107,206 +90,104 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
             Toast.makeText(this, "Map fragment missing in layout.", Toast.LENGTH_LONG).show();
             finish();
         }
+
+        down.setOnClickListener(v -> {
+            if (floors.isEmpty()) return;
+            if (floorIndex > 0) {
+                floorIndex--;
+                updateFloorLabel();
+                redrawFloor();
+            }
+        });
+
+        up.setOnClickListener(v -> {
+            if (floors.isEmpty()) return;
+            if (floorIndex < floors.size() - 1) {
+                floorIndex++;
+                updateFloorLabel();
+                redrawFloor();
+            }
+        });
     }
 
     @Override
     public void onMapReady(@NonNull GoogleMap googleMap) {
         mMap = googleMap;
 
-        // Always draw building outline as context
-        List<LatLng> outline = extractOutlineLatLngs(venue);
-        if (outline != null && outline.size() >= 3) {
-            mMap.addPolygon(new PolygonOptions().addAll(outline));
+        // 1) Draw outline (always)
+        venueOutline = extractOutlineLatLngs(venue);
+        if (venueOutline != null && venueOutline.size() >= 3) {
+            mMap.addPolygon(new PolygonOptions().addAll(venueOutline));
+            mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(venueOutline.get(0), 19f));
         }
 
-        // If we have real floor shapes, draw the current floor
-        if (!floors.isEmpty()) {
-            redrawCurrentFloor();
-        } else {
-            // Fallback: zoom to outline only
-            if (outline != null && !outline.isEmpty()) {
-                zoomToPoints(outline, 80);
-            }
-            Toast.makeText(this, "No map_shapes floors returned for this venue.", Toast.LENGTH_LONG).show();
-        }
-    }
+        // 2) Parse map_shapes into floor->list of polygons
+        Map<String, List<List<LatLng>>> floorToPolys = parseMapShapesToFloorPolygons(venue);
 
-    private void redrawCurrentFloor() {
-        if (mMap == null) return;
-        if (floors.isEmpty()) return;
-
-        String floorKey = floors.get(floorIndex);
-
-        // Clear and redraw: easiest + clean for coursework
-        mMap.clear();
-
-        // Re-draw outline
-        List<LatLng> outline = extractOutlineLatLngs(venue);
-        if (outline != null && outline.size() >= 3) {
-            mMap.addPolygon(new PolygonOptions().addAll(outline));
-        }
-
-        // Draw floor polygons
-        List<List<LatLng>> polys = floorToPolygons.get(floorKey);
-        if (polys == null || polys.isEmpty()) {
-            Toast.makeText(this, "No shapes for floor: " + floorKey, Toast.LENGTH_SHORT).show();
-            if (outline != null && !outline.isEmpty()) zoomToPoints(outline, 80);
+        if (floorToPolys.isEmpty()) {
+            Toast.makeText(this,
+                    "No drawable floor shapes found in map_shapes for this venue.",
+                    Toast.LENGTH_LONG).show();
+            // Still OK: outline proves selection + activity works (4A/4B wiring).
+            floors.clear();
+            floors.add("N/A");
+            floorIndex = 0;
+            updateFloorLabel();
             return;
         }
 
-        List<LatLng> allPts = new ArrayList<>();
+        floors.clear();
+        floors.addAll(floorToPolys.keySet()); // LinkedHashMap preserves insertion order
+        floorIndex = Math.min(floorIndex, floors.size() - 1);
+        updateFloorLabel();
 
-        for (List<LatLng> poly : polys) {
-            if (poly.size() >= 3) {
-                mMap.addPolygon(new PolygonOptions().addAll(poly));
-                allPts.addAll(poly);
+        // Store parsed shapes for redraw
+        this.cachedFloorToPolys = floorToPolys;
+
+        // 3) Draw initial floor
+        redrawFloor();
+    }
+
+    // Cache of parsed floor polygons
+    private Map<String, List<List<LatLng>>> cachedFloorToPolys = new LinkedHashMap<>();
+
+    private void redrawFloor() {
+        if (mMap == null) return;
+
+        // Clear old floor polys
+        for (Polygon p : drawnFloorPolys) p.remove();
+        drawnFloorPolys.clear();
+
+        if (floors.isEmpty()) return;
+
+        String floorKey = floors.get(floorIndex);
+        List<List<LatLng>> polys = cachedFloorToPolys.get(floorKey);
+        if (polys == null || polys.isEmpty()) {
+            Toast.makeText(this, "No shapes for floor " + floorKey, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int drawn = 0;
+        for (List<LatLng> pts : polys) {
+            if (pts != null && pts.size() >= 3) {
+                Polygon p = mMap.addPolygon(new PolygonOptions().addAll(pts));
+                drawnFloorPolys.add(p);
+                drawn++;
             }
         }
 
-        if (!allPts.isEmpty()) {
-            zoomToPoints(allPts, 120);
-        } else if (outline != null && !outline.isEmpty()) {
-            zoomToPoints(outline, 80);
-        }
-
-        Toast.makeText(this, "Showing floor: " + floorKey, Toast.LENGTH_SHORT).show();
-        Log.d(TAG, "Rendered floor=" + floorKey + " polygons=" + polys.size());
+        Toast.makeText(this, "Floor " + floorKey + " drawn: " + drawn + " shape(s)", Toast.LENGTH_SHORT).show();
     }
 
     private void updateFloorLabel() {
         if (tvFloor == null) return;
-        if (floors.isEmpty()) {
-            tvFloor.setText("Floor: (none)");
-        } else {
-            tvFloor.setText("Floor: " + floors.get(floorIndex));
-        }
+        if (floors.isEmpty()) tvFloor.setText("Floor: N/A");
+        else tvFloor.setText("Floor: " + floors.get(floorIndex));
     }
 
-    /**
-     * Parse venue.map_shapes (stringified GeoJSON FeatureCollection).
-     * Expected: { "type":"FeatureCollection", "features":[ ... ] }
-     * Each feature should have a properties object containing some floor indicator.
-     */
-    private void parseMapShapesIntoFloors(@NonNull JSONObject venueObj) {
-        floors.clear();
-        floorToPolygons.clear();
-
-        try {
-            String mapShapesStr = venueObj.optString("map_shapes", null);
-            if (mapShapesStr == null || mapShapesStr.trim().isEmpty()) {
-                Log.w(TAG, "map_shapes missing/empty in venue JSON");
-                return;
-            }
-
-            if (!mapShapesStr.trim().startsWith("{")) {
-                Log.w(TAG, "map_shapes is not JSON object text");
-                return;
-            }
-
-            JSONObject fc = new JSONObject(mapShapesStr);
-            JSONArray features = fc.optJSONArray("features");
-            if (features == null || features.length() == 0) {
-                Log.w(TAG, "map_shapes has no features");
-                return;
-            }
-
-            for (int i = 0; i < features.length(); i++) {
-                JSONObject feature = features.optJSONObject(i);
-                if (feature == null) continue;
-
-                JSONObject props = feature.optJSONObject("properties");
-                JSONObject geom = feature.optJSONObject("geometry");
-                if (geom == null) continue;
-
-                // Floor key: try common fields (we don’t guess new APIs; we just adapt)
-                String floorKey = extractFloorKey(props);
-                if (floorKey == null) floorKey = "unknown";
-
-                String type = geom.optString("type", "");
-                JSONArray coords = geom.optJSONArray("coordinates");
-
-                List<List<LatLng>> polyList = new ArrayList<>();
-
-                if ("Polygon".equalsIgnoreCase(type)) {
-                    List<LatLng> poly = parsePolygon(coords);
-                    if (poly != null) polyList.add(poly);
-                } else if ("MultiPolygon".equalsIgnoreCase(type)) {
-                    polyList.addAll(parseMultiPolygon(coords));
-                } else {
-                    // ignore LineString/Point/etc for now
-                    continue;
-                }
-
-                if (polyList.isEmpty()) continue;
-
-                List<List<LatLng>> bucket = floorToPolygons.get(floorKey);
-                if (bucket == null) {
-                    bucket = new ArrayList<>();
-                    floorToPolygons.put(floorKey, bucket);
-                }
-                bucket.addAll(polyList);
-            }
-
-            floors.addAll(floorToPolygons.keySet());
-
-            // Sort floors in a human-ish order: LG, G, 1, 2, 3... else alphabetical fallback
-            Collections.sort(floors, new Comparator<String>() {
-                @Override
-                public int compare(String a, String b) {
-                    return floorSortValue(a) - floorSortValue(b);
-                }
-            });
-
-            // Default to G if it exists
-            int gIndex = floors.indexOf("G");
-            if (gIndex >= 0) floorIndex = gIndex;
-            else floorIndex = 0;
-
-            Log.d(TAG, "Parsed map_shapes floors=" + floors + " buckets=" + floorToPolygons.size());
-
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to parse map_shapes", e);
-        }
-    }
-
-    @Nullable
-    private String extractFloorKey(@Nullable JSONObject props) {
-        if (props == null) return null;
-
-        // Common candidates (depends on dataset)
-        String[] keys = new String[]{"floor", "level", "storey", "story", "z", "layer"};
-        for (String k : keys) {
-            if (props.has(k)) {
-                String v = props.optString(k, null);
-                if (v != null && !v.trim().isEmpty() && !"null".equalsIgnoreCase(v.trim())) {
-                    return v.trim();
-                }
-                // If numeric
-                if (!props.isNull(k)) {
-                    double n = props.optDouble(k, Double.NaN);
-                    if (!Double.isNaN(n)) return String.valueOf((int) n);
-                }
-            }
-        }
-        return null;
-    }
-
-    private int floorSortValue(@NonNull String f) {
-        // Put common ones first
-        if (f.equalsIgnoreCase("LG")) return 0;
-        if (f.equalsIgnoreCase("G"))  return 1;
-
-        // numeric?
-        try {
-            int n = Integer.parseInt(f);
-            return 10 + n;
-        } catch (Exception ignored) { }
-
-        // Unknown floors after
-        return 1000 + f.toUpperCase().charAt(0);
-    }
-
-    // ===== Outline parsing (your venue.outline is a GeoJSON string) =====
+    // =========================
+    // Outline parsing (your API)
+    // =========================
 
     @Nullable
     private List<LatLng> extractOutlineLatLngs(@NonNull JSONObject venueObj) {
@@ -324,31 +205,225 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
             JSONObject geom = f0.optJSONObject("geometry");
             if (geom == null) return null;
 
-            String type = geom.optString("type", "");
-            JSONArray coords = geom.optJSONArray("coordinates");
-
-            if ("MultiPolygon".equalsIgnoreCase(type)) {
-                List<List<LatLng>> polys = parseMultiPolygon(coords);
-                return polys.isEmpty() ? null : polys.get(0);
-            } else if ("Polygon".equalsIgnoreCase(type)) {
-                return parsePolygon(coords);
-            }
+            return parseGeometryToLatLngs(geom);
         } catch (Exception e) {
             Log.e(TAG, "Outline parse failed", e);
+            return null;
         }
+    }
+
+    // =========================================
+    // map_shapes parsing (robust “Option A”)
+    // =========================================
+
+    @NonNull
+    private Map<String, List<List<LatLng>>> parseMapShapesToFloorPolygons(@NonNull JSONObject venueObj) {
+        Map<String, List<List<LatLng>>> out = new LinkedHashMap<>();
+
+        Object mapShapes = venueObj.opt("map_shapes");
+        if (mapShapes == null) {
+            Log.d(TAG, "map_shapes missing");
+            return out;
+        }
+
+        try {
+            // map_shapes might be a String containing JSON
+            if (mapShapes instanceof String) {
+                String s = ((String) mapShapes).trim();
+                if (s.startsWith("{")) mapShapes = new JSONObject(s);
+                else if (s.startsWith("[")) mapShapes = new JSONArray(s);
+            }
+
+            // Handle FeatureCollection in object form
+            if (mapShapes instanceof JSONObject) {
+                JSONObject obj = (JSONObject) mapShapes;
+
+                // Common: { "type":"FeatureCollection", "features":[...]}
+                if ("FeatureCollection".equalsIgnoreCase(obj.optString("type"))) {
+                    JSONArray features = obj.optJSONArray("features");
+                    consumeFeaturesIntoFloors(features, out);
+                    return out;
+                }
+
+                // Some APIs: { "floors": { "G": {FeatureCollection}, "1": {...} } }
+                // If object keys look like floors, just try each key as a floor bucket.
+                JSONArray names = obj.names();
+                if (names != null) {
+                    for (int i = 0; i < names.length(); i++) {
+                        String key = names.optString(i);
+                        Object v = obj.opt(key);
+                        JSONObject fc = null;
+                        if (v instanceof String) {
+                            String s = ((String) v).trim();
+                            if (s.startsWith("{")) fc = new JSONObject(s);
+                        } else if (v instanceof JSONObject) {
+                            fc = (JSONObject) v;
+                        }
+                        if (fc != null && "FeatureCollection".equalsIgnoreCase(fc.optString("type"))) {
+                            JSONArray features = fc.optJSONArray("features");
+                            consumeFeaturesIntoFloorsWithFixedFloor(features, out, key);
+                        }
+                    }
+                }
+
+                return out;
+            }
+
+            // Handle array form: could be features directly
+            if (mapShapes instanceof JSONArray) {
+                JSONArray arr = (JSONArray) mapShapes;
+
+                // If it looks like GeoJSON features
+                if (arr.length() > 0 && arr.optJSONObject(0) != null) {
+                    // might be [ {type:"Feature", ...}, ...]
+                    consumeFeaturesIntoFloors(arr, out);
+                    return out;
+                }
+            }
+
+            Log.d(TAG, "map_shapes exists but schema not recognized. type=" + mapShapes.getClass().getSimpleName());
+        } catch (Exception e) {
+            Log.e(TAG, "Failed parsing map_shapes", e);
+        }
+
+        return out;
+    }
+
+    private void consumeFeaturesIntoFloors(@Nullable JSONArray features,
+                                           @NonNull Map<String, List<List<LatLng>>> out) throws Exception {
+        if (features == null) return;
+
+        // Keep seen floors in insertion order
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+
+        for (int i = 0; i < features.length(); i++) {
+            JSONObject f = features.optJSONObject(i);
+            if (f == null) continue;
+
+            JSONObject props = f.optJSONObject("properties");
+            String floor = extractFloorFromProperties(props);
+            if (floor == null) floor = "unknown";
+
+            JSONObject geom = f.optJSONObject("geometry");
+            if (geom == null) continue;
+
+            List<List<LatLng>> polys = geometryToPolygons(geom);
+            if (polys.isEmpty()) continue;
+
+            if (!out.containsKey(floor)) out.put(floor, new ArrayList<>());
+            out.get(floor).addAll(polys);
+            seen.add(floor);
+        }
+
+        Log.d(TAG, "Parsed floors from map_shapes: " + seen);
+    }
+
+    private void consumeFeaturesIntoFloorsWithFixedFloor(@Nullable JSONArray features,
+                                                         @NonNull Map<String, List<List<LatLng>>> out,
+                                                         @NonNull String floor) throws Exception {
+        if (features == null) return;
+
+        for (int i = 0; i < features.length(); i++) {
+            JSONObject f = features.optJSONObject(i);
+            if (f == null) continue;
+
+            JSONObject geom = f.optJSONObject("geometry");
+            if (geom == null) continue;
+
+            List<List<LatLng>> polys = geometryToPolygons(geom);
+            if (polys.isEmpty()) continue;
+
+            if (!out.containsKey(floor)) out.put(floor, new ArrayList<>());
+            out.get(floor).addAll(polys);
+        }
+
+        Log.d(TAG, "Parsed floor bucket: " + floor + " count=" + out.get(floor).size());
+    }
+
+    @Nullable
+    private String extractFloorFromProperties(@Nullable JSONObject props) {
+        if (props == null) return null;
+
+        // Try common keys
+        String f = props.optString("floor", null);
+        if (f != null && !f.trim().isEmpty()) return f;
+
+        f = props.optString("level", null);
+        if (f != null && !f.trim().isEmpty()) return f;
+
+        // Sometimes numeric (z)
+        if (props.has("z")) return String.valueOf(props.optInt("z"));
+
+        // Sometimes name includes floor
+        f = props.optString("name", null);
+        if (f != null && !f.trim().isEmpty()) return f;
+
         return null;
     }
 
-    // ===== GeoJSON parsing helpers =====
+    // =========================
+    // GeoJSON geometry parsing
+    // =========================
+
+    @Nullable
+    private List<LatLng> parseGeometryToLatLngs(@NonNull JSONObject geometry) {
+        String type = geometry.optString("type", "");
+        JSONArray coords = geometry.optJSONArray("coordinates");
+
+        if ("Polygon".equalsIgnoreCase(type)) return parsePolygon(coords);
+        if ("MultiPolygon".equalsIgnoreCase(type)) return parseMultiPolygon(coords);
+
+        return null;
+    }
+
+    @NonNull
+    private List<List<LatLng>> geometryToPolygons(@NonNull JSONObject geometry) {
+        List<List<LatLng>> out = new ArrayList<>();
+
+        String type = geometry.optString("type", "");
+        JSONArray coords = geometry.optJSONArray("coordinates");
+
+        if ("Polygon".equalsIgnoreCase(type)) {
+            List<LatLng> p = parsePolygon(coords);
+            if (p != null) out.add(p);
+        } else if ("MultiPolygon".equalsIgnoreCase(type)) {
+            // Add first polygon outer ring for each polygon entry
+            if (coords != null) {
+                for (int i = 0; i < coords.length(); i++) {
+                    JSONArray poly = coords.optJSONArray(i);
+                    if (poly == null) continue;
+                    // poly[0] = outer ring
+                    JSONArray ring = poly.optJSONArray(0);
+                    if (ring == null) continue;
+                    List<LatLng> pts = parseRing(ring);
+                    if (pts != null) out.add(pts);
+                }
+            }
+        }
+
+        return out;
+    }
 
     @Nullable
     private List<LatLng> parsePolygon(@Nullable JSONArray coordinates) {
         if (coordinates == null) return null;
-
-        // Polygon: coordinates[0] is outer ring
         JSONArray ring = coordinates.optJSONArray(0);
         if (ring == null) return null;
+        return parseRing(ring);
+    }
 
+    @Nullable
+    private List<LatLng> parseMultiPolygon(@Nullable JSONArray coordinates) {
+        if (coordinates == null) return null;
+        JSONArray poly0 = coordinates.optJSONArray(0);
+        if (poly0 == null) return null;
+        JSONArray ring0 = poly0.optJSONArray(0);
+        if (ring0 == null) return null;
+        return parseRing(ring0);
+    }
+
+    @Nullable
+    private List<LatLng> parseRing(@NonNull JSONArray ring) {
         List<LatLng> pts = new ArrayList<>();
         for (int i = 0; i < ring.length(); i++) {
             JSONArray pair = ring.optJSONArray(i);
@@ -360,43 +435,5 @@ public class IndoorMapActivity extends AppCompatActivity implements OnMapReadyCa
         }
         return pts.size() >= 3 ? pts : null;
     }
-
-    @NonNull
-    private List<List<LatLng>> parseMultiPolygon(@Nullable JSONArray coordinates) {
-        List<List<LatLng>> out = new ArrayList<>();
-        if (coordinates == null) return out;
-
-        // MultiPolygon: [ polygon1, polygon2, ... ]
-        for (int p = 0; p < coordinates.length(); p++) {
-            JSONArray poly = coordinates.optJSONArray(p);
-            if (poly == null) continue;
-
-            // poly[0] = outer ring
-            JSONArray ring = poly.optJSONArray(0);
-            if (ring == null) continue;
-
-            List<LatLng> pts = new ArrayList<>();
-            for (int i = 0; i < ring.length(); i++) {
-                JSONArray pair = ring.optJSONArray(i);
-                if (pair == null || pair.length() < 2) continue;
-
-                double lon = pair.optDouble(0, Double.NaN);
-                double lat = pair.optDouble(1, Double.NaN);
-                if (!Double.isNaN(lat) && !Double.isNaN(lon)) pts.add(new LatLng(lat, lon));
-            }
-
-            if (pts.size() >= 3) out.add(pts);
-        }
-        return out;
-    }
-
-    private void zoomToPoints(@NonNull List<LatLng> pts, int paddingPx) {
-        if (mMap == null || pts.isEmpty()) return;
-
-        LatLngBounds.Builder b = new LatLngBounds.Builder();
-        for (LatLng p : pts) b.include(p);
-
-        LatLngBounds bounds = b.build();
-        mMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, paddingPx));
-    }
 }
+
