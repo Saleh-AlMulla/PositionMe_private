@@ -5,10 +5,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
+import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Looper;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -36,24 +38,23 @@ import com.google.android.gms.maps.model.MarkerOptions;
 import com.openpositioning.PositionMe.BuildConfig;
 import com.openpositioning.PositionMe.R;
 import com.openpositioning.PositionMe.data.remote.FloorplanApiClient;
-import com.openpositioning.PositionMe.presentation.activity.IndoorActivity;
 import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
 import com.openpositioning.PositionMe.utils.IndoorSelectionStore;
-
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.Polygon;
 import com.google.android.gms.maps.model.PolygonOptions;
+
 import org.json.JSONArray;
-import org.json.JSONObject;
 import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * HomeFragment
@@ -160,17 +161,9 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 .getApplicationContext()
                 .getSystemService(Context.WIFI_SERVICE);
 
-        // Indoor button:
-        // - Step (d) request nearby indoor maps (live lat/lon + live MACs)
-        // - Then (optionally) open your IndoorActivity list UI
+        // Indoor button: request nearby indoor maps (live lat/lon + live MACs)
         indoorButton = view.findViewById(R.id.indoorButton);
-        indoorButton.setOnClickListener(v -> {
-            requestNearbyIndoorMaps();
-
-            // Keep your existing screen (SSID/RSSI list) if wanted (commented out now)
-            //Intent intent = new Intent(requireContext(), IndoorActivity.class);
-            //startActivity(intent);
-        });
+        indoorButton.setOnClickListener(v -> requestNearbyIndoorMaps());
     }
 
     /**
@@ -244,9 +237,12 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
     // Step (d) - request nearby indoor maps using LIVE location + LIVE MACs
     // ======================================================================
 
+    /**
+     * Entry point when user taps the Indoor button.
+     * We do NOT use getLastKnownLocation() anymore, because it can be stale even when the blue dot looks correct.
+     */
     private void requestNearbyIndoorMaps() {
 
-        // Wi-Fi scan results require location permission on Android.
         boolean fineGranted = ActivityCompat.checkSelfPermission(
                 requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean coarseGranted = ActivityCompat.checkSelfPermission(
@@ -257,17 +253,75 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             return;
         }
 
-        // Get last known location (best effort; good enough for coursework).
-        Location loc = getBestLastKnownLocation();
-        if (loc == null) {
+        // Force a fresh location fix for the request.
+        requestFreshLocationAndIndoorRequest();
+    }
+
+    /**
+     * Requests a one-shot location update (Network preferred indoors).
+     * Then calls handleIndoorRequestWithLocation() with a fresh fix.
+     */
+    private void requestFreshLocationAndIndoorRequest() {
+
+        LocationManager lm =
+                (LocationManager) requireContext().getSystemService(Context.LOCATION_SERVICE);
+
+        try {
+            boolean networkEnabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+            boolean gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER);
+
+            if (!networkEnabled && !gpsEnabled) {
+                Toast.makeText(requireContext(),
+                        "Location providers disabled. Enable location services and try again.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            String provider = networkEnabled
+                    ? LocationManager.NETWORK_PROVIDER
+                    : LocationManager.GPS_PROVIDER;
+
+            Toast.makeText(requireContext(), "Getting fresh location…", Toast.LENGTH_SHORT).show();
+
+            lm.requestSingleUpdate(provider, new LocationListener() {
+                @Override
+                public void onLocationChanged(@NonNull Location location) {
+                    handleIndoorRequestWithLocation(location);
+                }
+
+                @Override
+                public void onProviderDisabled(@NonNull String provider) {
+                    // Not critical
+                }
+
+                @Override
+                public void onProviderEnabled(@NonNull String provider) {
+                    // Not critical
+                }
+            }, Looper.getMainLooper());
+
+        } catch (SecurityException e) {
             Toast.makeText(requireContext(),
-                    "Location unavailable. Enable location and try again.",
+                    "Location permission missing.",
                     Toast.LENGTH_LONG).show();
-            return;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get fresh location", e);
+            Toast.makeText(requireContext(),
+                    "Could not get a fresh location fix. Try again.",
+                    Toast.LENGTH_LONG).show();
         }
+    }
+
+    /**
+     * Executes the floorplan request using a fresh location fix.
+     * This is basically your old requestNearbyIndoorMaps() body.
+     */
+    private void handleIndoorRequestWithLocation(@NonNull Location loc) {
 
         double lat = loc.getLatitude();
         double lon = loc.getLongitude();
+
+        Log.d(TAG, "Indoor request lat=" + lat + " lon=" + lon);
 
         // Observed AP MACs (BSSID)
         List<String> macs = getObservedMacs();
@@ -278,7 +332,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             return;
         }
 
-        // If user API key isn't set, fail early with a readable message.
         if (BuildConfig.OPENPOSITIONING_API_KEY == null || BuildConfig.OPENPOSITIONING_API_KEY.trim().isEmpty()) {
             Toast.makeText(requireContext(),
                     "OpenPositioning API key missing. Add OPENPOSITIONING_API_KEY to secrets.properties.",
@@ -290,7 +343,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 "Requesting indoor maps… (" + macs.size() + " APs)",
                 Toast.LENGTH_SHORT).show();
 
-        // DEBUG: confirm API key is actually present in BuildConfig
         Log.d(TAG, "OPENPOSITIONING_API_KEY length=" +
                 (BuildConfig.OPENPOSITIONING_API_KEY == null ? 0 : BuildConfig.OPENPOSITIONING_API_KEY.trim().length()));
 
@@ -306,14 +358,13 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                             Log.d(TAG, "Floorplan response: " + rawJson);
                             renderVenuesOnMap(rawJson);
 
-                            // Step 2 goal: confirm request works and handle empty result cleanly.
                             if ("[]".equals(rawJson.trim())) {
                                 Toast.makeText(requireContext(),
-                                        "No indoor venues found nearby (try at Uni).",
+                                        "No indoor venues found nearby (try a different building).",
                                         Toast.LENGTH_LONG).show();
                             } else {
                                 Toast.makeText(requireContext(),
-                                        "Indoor venues received (next: draw outlines).",
+                                        "Indoor venues received.",
                                         Toast.LENGTH_LONG).show();
                             }
                         });
@@ -330,27 +381,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                     }
                 }
         );
-    }
-
-    @Nullable
-    private Location getBestLastKnownLocation() {
-        LocationManager lm =
-                (LocationManager) requireContext().getSystemService(Context.LOCATION_SERVICE);
-
-        Location best = null;
-
-        try {
-            Location gps = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-            Location net = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-
-            if (gps != null) best = gps;
-            if (net != null && (best == null || net.getAccuracy() < best.getAccuracy())) best = net;
-
-        } catch (SecurityException ignored) {
-            // Permission checked before calling
-        }
-
-        return best;
     }
 
     @NonNull
@@ -397,13 +427,10 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         }
     }
 
+    // ======================================================================
+    // Step (d): Draw building outlines / venue markers from the floorplan API response.
+    // ======================================================================
 
-    /**
-     * Step (d): Draw building outlines / venue markers from the floorplan API response.
-     * We keep parsing flexible because the API may return either:
-     *  - a JSON array of venues, or
-     *  - a GeoJSON-like object with "features".
-     */
     private void renderVenuesOnMap(@NonNull String rawJson) {
 
         if (mMap == null) return;
@@ -412,10 +439,8 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         clearVenueOverlays();
 
         try {
-            // Try as array first
             JSONArray venuesArray = tryParseAsArray(rawJson);
             if (venuesArray == null) {
-                // Try as object with "features"
                 JSONObject obj = new JSONObject(rawJson);
                 if (obj.has("features")) {
                     venuesArray = obj.getJSONArray("features");
@@ -434,7 +459,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             for (int i = 0; i < venuesArray.length(); i++) {
                 JSONObject venue = venuesArray.getJSONObject(i);
 
-                // Extract polygon points if available
                 List<LatLng> outline = extractVenueOutlineLatLngs(venue);
 
                 if (outline != null && outline.size() >= 3) {
@@ -445,7 +469,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                     polygonToVenue.put(poly, venue);
                     drawnCount++;
                 } else {
-                    // Fallback: try to place a marker (center point)
                     LatLng center = extractVenueCenterLatLng(venue);
                     if (center != null) {
                         Marker m = mMap.addMarker(new MarkerOptions()
@@ -463,10 +486,18 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 if (venue == null) return;
 
                 String venueName = extractVenueName(venue);
-                String venueId = extractVenueIdBestEffort(venue); // Step 4A: stable-ish key if available
+                String venueId = extractVenueIdBestEffort(venue);
 
-                // Persist the selection for later steps (4B/4C)
+                //API returns id=null for murchison_house, so use name as stable id
+                if (venueId == null || venueId.trim().isEmpty()) {
+                    venueId = venue.optString("name", null);  // e.g., "murchison_house"
+                }
+
                 IndoorSelectionStore.saveSelectedVenue(requireContext(), venueId, venueName, venue);
+
+                Intent intent = new Intent(requireContext(), com.openpositioning.PositionMe.presentation.activity.IndoorMapActivity.class);
+                startActivity(intent);
+
 
                 Toast.makeText(requireContext(),
                         "Selected venue: " + venueName,
@@ -476,10 +507,15 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 Log.d(TAG, "Selected venue JSON: " + venue.toString());
             });
 
-
-            Toast.makeText(requireContext(),
-                    "Displayed " + drawnCount + " venue(s) on the map.",
-                    Toast.LENGTH_LONG).show();
+            if (drawnCount == 0) {
+                Toast.makeText(requireContext(),
+                        "Indoor venues received, but none could be rendered (outline format).",
+                        Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(requireContext(),
+                        "Displayed " + drawnCount + " venue(s) on the map.",
+                        Toast.LENGTH_LONG).show();
+            }
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to render venues: " + rawJson, e);
@@ -507,13 +543,8 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         venueMarkers.clear();
     }
 
-    /**
-     * Attempt to extract a venue name for UI feedback.
-     * Tries common fields; falls back to "Venue".
-     */
     @NonNull
     private String extractVenueName(@NonNull JSONObject venue) {
-        // GeoJSON style: { properties: { name: ... } }
         JSONObject props = venue.optJSONObject("properties");
         if (props != null) {
             String n = props.optString("name", "");
@@ -524,7 +555,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             if (!n.isEmpty()) return n;
         }
 
-        // Flat style: { name: ... } or { venue: ... }
         String name = venue.optString("name", "");
         if (!name.isEmpty()) return name;
 
@@ -539,14 +569,12 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
 
     @Nullable
     private String extractVenueIdBestEffort(@NonNull JSONObject venue) {
-        // Prefer a true id if present
         String id = venue.optString("id", null);
         if (id != null && !id.trim().isEmpty()) return id;
 
         id = venue.optString("venue_id", null);
         if (id != null && !id.trim().isEmpty()) return id;
 
-        // GeoJSON style: properties.id
         JSONObject props = venue.optJSONObject("properties");
         if (props != null) {
             id = props.optString("id", null);
@@ -556,40 +584,60 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             if (id != null && !id.trim().isEmpty()) return id;
         }
 
-        // If we can’t find it reliably, store null for now.
-        // Tomorrow (with real uni JSON) we’ll lock onto the exact correct field.
         return null;
     }
 
-
-    /**
-     * Extract polygon outline points.
-     * Supports common structures:
-     *  1) GeoJSON: geometry: { type:"Polygon", coordinates:[ [ [lon,lat], ... ] ] }
-     *  2) Custom: outline: [ {lat:.., lon:..}, ... ] or outline: [ [lon,lat], ... ]
-     */
     @Nullable
     private List<LatLng> extractVenueOutlineLatLngs(@NonNull JSONObject venue) {
 
-        // Case A: GeoJSON geometry
+        // Case A: GeoJSON geometry directly on the object (if API returns that style)
         JSONObject geometry = venue.optJSONObject("geometry");
         if (geometry != null) {
-            String type = geometry.optString("type", "");
-            if ("Polygon".equalsIgnoreCase(type)) {
-                JSONArray coords = geometry.optJSONArray("coordinates");
-                List<LatLng> out = parseGeoJsonPolygon(coords);
-                if (out != null) return out;
-            }
+            List<LatLng> out = parseGeometryToLatLngs(geometry);
+            if (out != null) return out;
         }
 
-        // Case B: direct outline
+        // Case B: outline is a JSON ARRAY (your old handling)
         JSONArray outlineArr = venue.optJSONArray("outline");
         if (outlineArr != null) {
             List<LatLng> out = parseOutlineArray(outlineArr);
             if (out != null) return out;
         }
 
-        // Case C: properties.outline
+        // Case C: outline is a STRING containing GeoJSON (THIS IS YOUR CURRENT API RESPONSE)
+        String outlineStr = venue.optString("outline", null);
+        if (outlineStr != null && outlineStr.trim().startsWith("{")) {
+            try {
+                JSONObject outlineObj = new JSONObject(outlineStr);
+
+                // Often FeatureCollection -> features[0].geometry
+                if ("FeatureCollection".equalsIgnoreCase(outlineObj.optString("type"))) {
+                    JSONArray features = outlineObj.optJSONArray("features");
+                    if (features != null && features.length() > 0) {
+                        JSONObject feature0 = features.optJSONObject(0);
+                        if (feature0 != null) {
+                            JSONObject g = feature0.optJSONObject("geometry");
+                            if (g != null) {
+                                List<LatLng> out = parseGeometryToLatLngs(g);
+                                if (out != null) return out;
+                            }
+                        }
+                    }
+                }
+
+                // If not a FeatureCollection, maybe it is directly a geometry
+                JSONObject g2 = outlineObj.optJSONObject("geometry");
+                if (g2 != null) {
+                    List<LatLng> out = parseGeometryToLatLngs(g2);
+                    if (out != null) return out;
+                }
+
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to parse outline string GeoJSON", e);
+            }
+        }
+
+        // Case D: properties.outline (array or string)
         JSONObject props = venue.optJSONObject("properties");
         if (props != null) {
             JSONArray propsOutline = props.optJSONArray("outline");
@@ -597,17 +645,38 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 List<LatLng> out = parseOutlineArray(propsOutline);
                 if (out != null) return out;
             }
+
+            String propsOutlineStr = props.optString("outline", null);
+            if (propsOutlineStr != null && propsOutlineStr.trim().startsWith("{")) {
+                try {
+                    JSONObject outlineObj = new JSONObject(propsOutlineStr);
+                    JSONArray features = outlineObj.optJSONArray("features");
+                    if (features != null && features.length() > 0) {
+                        JSONObject feature0 = features.optJSONObject(0);
+                        if (feature0 != null) {
+                            JSONObject g = feature0.optJSONObject("geometry");
+                            if (g != null) {
+                                List<LatLng> out = parseGeometryToLatLngs(g);
+                                if (out != null) return out;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to parse properties.outline string GeoJSON", e);
+                }
+            }
         }
 
         return null;
     }
 
+
+
+
     @Nullable
     private List<LatLng> parseGeoJsonPolygon(@Nullable JSONArray coordinates) {
         if (coordinates == null) return null;
 
-        // GeoJSON polygon coordinates: [ [ [lon,lat], [lon,lat], ... ] , ... ]
-        // We take the outer ring: coordinates[0]
         JSONArray outerRing = coordinates.optJSONArray(0);
         if (outerRing == null) return null;
 
@@ -623,7 +692,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             pts.add(new LatLng(lat, lon));
         }
 
-        // Some polygons repeat first point at end; that's fine for Google Maps.
         return pts.size() >= 3 ? pts : null;
     }
 
@@ -639,7 +707,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 double lat = o.optDouble("lat", Double.NaN);
                 double lon = o.optDouble("lon", Double.NaN);
 
-                // Sometimes it's lng instead of lon
                 if (Double.isNaN(lon)) lon = o.optDouble("lng", Double.NaN);
 
                 if (!Double.isNaN(lat) && !Double.isNaN(lon)) {
@@ -660,13 +727,6 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         return pts.size() >= 3 ? pts : null;
     }
 
-    /**
-     * Fallback marker center extraction.
-     * Supports:
-     *  - { lat:..., lon:... }
-     *  - { properties: { lat/lon } }
-     *  - GeoJSON Point geometry
-     */
     @Nullable
     private LatLng extractVenueCenterLatLng(@NonNull JSONObject venue) {
 
@@ -695,6 +755,75 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         }
 
         return null;
+    }
+
+    @Nullable
+    private List<LatLng> parseGeometryToLatLngs(@NonNull JSONObject geometry) {
+        String type = geometry.optString("type", "");
+
+        if ("Polygon".equalsIgnoreCase(type)) {
+            JSONArray coords = geometry.optJSONArray("coordinates");
+            return parseGeoJsonPolygon(coords);
+        }
+
+        if ("MultiPolygon".equalsIgnoreCase(type)) {
+            JSONArray coords = geometry.optJSONArray("coordinates");
+            return parseGeoJsonMultiPolygon(coords);
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private List<LatLng> parseGeoJsonMultiPolygon(@Nullable JSONArray coordinates) {
+        if (coordinates == null) return null;
+
+        // MultiPolygon coordinates: [ [ [ [lon,lat], ... ] ] , ... ]
+        // Take first polygon's outer ring: coordinates[0][0]
+        JSONArray firstPoly = coordinates.optJSONArray(0);
+        if (firstPoly == null) return null;
+
+        JSONArray outerRing = firstPoly.optJSONArray(0);
+        if (outerRing == null) return null;
+
+        List<LatLng> pts = new ArrayList<>();
+        for (int i = 0; i < outerRing.length(); i++) {
+            JSONArray pair = outerRing.optJSONArray(i);
+            if (pair == null || pair.length() < 2) continue;
+
+            double lon = pair.optDouble(0, Double.NaN);
+            double lat = pair.optDouble(1, Double.NaN);
+            if (Double.isNaN(lat) || Double.isNaN(lon)) continue;
+
+            pts.add(new LatLng(lat, lon));
+        }
+
+        return pts.size() >= 3 ? pts : null;
+    }
+
+
+    // -----------------------------------------------------------------------------------------
+    // Old last-known helper (no longer used). Kept for now so i can compare/remove later.
+    // -----------------------------------------------------------------------------------------
+    @Nullable
+    private Location getBestLastKnownLocation() {
+        LocationManager lm =
+                (LocationManager) requireContext().getSystemService(Context.LOCATION_SERVICE);
+
+        Location best = null;
+
+        try {
+            Location gps = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+            Location net = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+
+            if (gps != null) best = gps;
+            if (net != null && (best == null || net.getAccuracy() < best.getAccuracy())) best = net;
+
+        } catch (SecurityException ignored) {
+            // Permission checked before calling
+        }
+
+        return best;
     }
 }
 
