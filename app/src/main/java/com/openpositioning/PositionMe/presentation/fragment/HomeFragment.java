@@ -38,6 +38,8 @@ import com.openpositioning.PositionMe.R;
 import com.openpositioning.PositionMe.data.remote.FloorplanApiClient;
 import com.openpositioning.PositionMe.presentation.activity.IndoorActivity;
 import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
+import com.openpositioning.PositionMe.utils.IndoorSelectionStore;
+
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -460,15 +462,20 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
                 JSONObject venue = polygonToVenue.get(polygon);
                 if (venue == null) return;
 
-                // Minimal "selection" for Step 3: show a toast + log.
-                // Step 4 will persist venue + open floorplan/floor picker.
-                String name = extractVenueName(venue);
+                String venueName = extractVenueName(venue);
+                String venueId = extractVenueIdBestEffort(venue); // Step 4A: stable-ish key if available
+
+                // Persist the selection for later steps (4B/4C)
+                IndoorSelectionStore.saveSelectedVenue(requireContext(), venueId, venueName, venue);
+
                 Toast.makeText(requireContext(),
-                        "Selected venue: " + name,
+                        "Selected venue: " + venueName,
                         Toast.LENGTH_LONG).show();
 
+                Log.d(TAG, "Saved selected venue. id=" + venueId + " name=" + venueName);
                 Log.d(TAG, "Selected venue JSON: " + venue.toString());
             });
+
 
             Toast.makeText(requireContext(),
                     "Displayed " + drawnCount + " venue(s) on the map.",
@@ -529,6 +536,31 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
 
         return "Venue";
     }
+
+    @Nullable
+    private String extractVenueIdBestEffort(@NonNull JSONObject venue) {
+        // Prefer a true id if present
+        String id = venue.optString("id", null);
+        if (id != null && !id.trim().isEmpty()) return id;
+
+        id = venue.optString("venue_id", null);
+        if (id != null && !id.trim().isEmpty()) return id;
+
+        // GeoJSON style: properties.id
+        JSONObject props = venue.optJSONObject("properties");
+        if (props != null) {
+            id = props.optString("id", null);
+            if (id != null && !id.trim().isEmpty()) return id;
+
+            id = props.optString("venue_id", null);
+            if (id != null && !id.trim().isEmpty()) return id;
+        }
+
+        // If we can’t find it reliably, store null for now.
+        // Tomorrow (with real uni JSON) we’ll lock onto the exact correct field.
+        return null;
+    }
+
 
     /**
      * Extract polygon outline points.
