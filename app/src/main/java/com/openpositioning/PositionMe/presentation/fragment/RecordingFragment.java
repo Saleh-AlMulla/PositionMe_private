@@ -57,8 +57,14 @@ import com.google.android.gms.maps.model.LatLng;
  */
 
 public class RecordingFragment extends Fragment {
+    // test point buttons
+    //Marker numberings
+    private int nextTestPointId = 1;
 
+    // relative timestamp baseline (ms since epoch at "recording start")
+    private long startTimestampMs = 0L;
     // UI elements
+    private MaterialButton TestPointButton ;
     private MaterialButton completeButton, cancelButton;
     private ImageView recIcon;
     private ProgressBar timeRemaining;
@@ -116,6 +122,8 @@ public class RecordingFragment extends Fragment {
                               @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        if(startTimestampMs == 0L) startTimestampMs = System.currentTimeMillis();
+
         // Child Fragment: the container in fragment_recording.xml
         // where TrajectoryMapFragment is placed
         trajectoryMapFragment = (TrajectoryMapFragment)
@@ -140,6 +148,9 @@ public class RecordingFragment extends Fragment {
         recIcon = view.findViewById(R.id.redDot);
         timeRemaining = view.findViewById(R.id.timeRemainingBar);
 
+        //adding the test point button
+        TestPointButton = view.findViewById(R.id.button_add_Test_Point);
+
         // Hide or initialize default values
         gnssError.setVisibility(View.GONE);
         elevation.setText(getString(R.string.elevation, "0"));
@@ -152,6 +163,18 @@ public class RecordingFragment extends Fragment {
             sensorFusion.stopRecording();
             // Show Correction screen
             ((RecordingActivity) requireActivity()).showCorrectionScreen();
+        });
+
+        TestPointButton.setOnClickListener(v -> {
+            LatLng loc = trajectoryMapFragment.getCurrentLocation();
+            if (loc == null) return;
+            String label = String.valueOf(nextTestPointId++);
+            trajectoryMapFragment.addNumberedMarker(loc, label);
+            //Time
+            long relMs = System.currentTimeMillis() - startTimestampMs;
+            android.util.Log.d("AddTag",
+                    "label=" + label + " relMs=" + relMs +
+                            " lat=" + loc.latitude + " lon=" + loc.longitude);
         });
 
 
