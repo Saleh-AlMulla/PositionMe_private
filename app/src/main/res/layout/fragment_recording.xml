@@ -81,6 +81,19 @@
         app:layout_constraintTop_toBottomOf="@id/currentPositionCard"
         app:layout_constraintBottom_toTopOf="@id/controlLayout" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/button_add_tag"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/add_tag"
+
+        app:layout_constraintBottom_toTopOf="@id/controlLayout"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+
+        android:layout_marginBottom="12dp" />
+
+
     <!-- 🔹 BOTTOM SECTION: Controls (Progress Bar & Buttons) -->
     <LinearLayout
         android:id="@+id/controlLayout"
@@ -142,4 +155,7 @@
                 app:cornerRadius="16dp" />
         </LinearLayout>
     </LinearLayout>
+
+    <androidx.constraintlayout.widget.Guideline android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
 </androidx.constraintlayout.widget.ConstraintLayout>
