@@ -46,6 +46,9 @@
     <string name="averageStepLgn">Computed Avg. Step Length</string>
     <string name="correctStepLgn">unit: cm</string>
     <string name="locationInstructions">Long press and drag the marker to your start location</string>
+    <string name="buildingSelectionInstructions">Tap a building outline to select your venue, then adjust the marker</string>
+    <string name="buildingSelected">Selected: %1$s</string>
+    <string name="noBuildingsFound">No buildings found nearby. Drag the marker to your start position.</string>
     <string name="correctionInstructions">Zoom, scroll and rotate the map \n to correct the path</string>
 
     <!-- Sensor Info -->
@@ -136,5 +139,15 @@
     <string name="replay_frag_play">Play</string>
     <string name="replay_frag_end">End</string>
     <string name="replay_frag_exit">Exit</string>
+    <string name="indoor_positioning">Indoor Positioning</string>
+    <string name="indoor_mode_hint">Entering Indoor Positioning mode</string>
+
+    <!-- Trajectory validation -->
+    <string name="validation_error_title">Trajectory Quality Issues</string>
+    <string name="validation_error_message">The trajectory has quality problems that may cause the upload to be rejected by the server:\n\n%1$s\n\nDo you still want to upload?</string>
+    <string name="validation_warning_title">Trajectory Quality Notice</string>
+    <string name="validation_warning_message">The trajectory has minor quality issues:\n\n%1$s\n\nDo you still want to upload?</string>
+    <string name="upload_anyway">Upload Anyway</string>
+    <string name="cancel_upload">Cancel</string>
 
 </resources>

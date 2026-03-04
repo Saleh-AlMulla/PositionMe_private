@@ -11,6 +11,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
+import android.util.Log;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -45,11 +47,14 @@ import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
  */
 public class HomeFragment extends Fragment implements OnMapReadyCallback {
 
+    private static final String TAG = "HomeFragment";
+
     // Interactive UI elements to navigate to other fragments
     private MaterialButton goToInfo;
     private Button start;
     private Button measurements;
     private Button files;
+    private Button indoorButton;
     private TextView gnssStatusTextView;
 
     // For the map
@@ -116,6 +121,12 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
             Navigation.findNavController(v).navigate(action);
         });
 
+        // Indoor Positioning button
+        indoorButton = view.findViewById(R.id.indoorButton);
+        indoorButton.setOnClickListener(v -> {
+            Toast.makeText(requireContext(), R.string.indoor_mode_hint, Toast.LENGTH_SHORT).show();
+        });
+
         // TextView to display GNSS disabled message
         gnssStatusTextView = view.findViewById(R.id.gnssStatusTextView);
 
@@ -123,8 +134,11 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
         mapFragment = (SupportMapFragment)
                 getChildFragmentManager().findFragmentById(R.id.mapFragmentContainer);
         if (mapFragment != null) {
+            Log.e(TAG, "Map fragment found, calling getMapAsync");
             // Asynchronously initialize the map
             mapFragment.getMapAsync(this);
+        } else {
+            Log.e(TAG, "Map fragment is NULL - cannot initialize Google Map");
         }
     }
 
@@ -134,6 +148,22 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
     @Override
     public void onMapReady(@NonNull GoogleMap googleMap) {
         mMap = googleMap;
+        Log.e(TAG, "onMapReady called, GoogleMap instance: " + googleMap);
+        Log.e(TAG, "Map type: " + googleMap.getMapType());
+        try {
+            // Check API key from AndroidManifest meta-data
+            android.content.pm.ApplicationInfo appInfo = requireContext().getPackageManager()
+                    .getApplicationInfo(requireContext().getPackageName(),
+                            android.content.pm.PackageManager.GET_META_DATA);
+            if (appInfo.metaData != null) {
+                String apiKey = appInfo.metaData.getString("com.google.android.geo.API_KEY");
+                Log.e(TAG, "API_KEY from manifest: " + (apiKey != null ? apiKey.substring(0, 10) + "..." : "NULL"));
+            } else {
+                Log.e(TAG, "metaData is NULL - no API_KEY found in manifest");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to read API_KEY from manifest", e);
+        }
         checkAndUpdatePermissions();
     }
 
@@ -172,45 +202,39 @@ public class HomeFragment extends Fragment implements OnMapReadyCallback {
     private void checkAndUpdatePermissions() {
 
         if (mMap == null) {
+            Log.e(TAG, "checkAndUpdatePermissions: mMap is NULL, map not ready yet");
             return;
         }
 
         // Check if GNSS/Location is enabled
         boolean gnssEnabled = isGnssEnabled();
+        Log.e(TAG, "checkAndUpdatePermissions: gnssEnabled=" + gnssEnabled);
+
         if (gnssEnabled) {
             // Hide the "GNSS Disabled" message
             gnssStatusTextView.setVisibility(View.GONE);
 
             // Check runtime permissions for location
-            if (ActivityCompat.checkSelfPermission(
+            boolean fineGranted = ActivityCompat.checkSelfPermission(
                     requireContext(), Manifest.permission.ACCESS_FINE_LOCATION)
-                    == PackageManager.PERMISSION_GRANTED ||
-                    ActivityCompat.checkSelfPermission(
-                            requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION)
-                            == PackageManager.PERMISSION_GRANTED) {
+                    == PackageManager.PERMISSION_GRANTED;
+            boolean coarseGranted = ActivityCompat.checkSelfPermission(
+                    requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED;
+            Log.e(TAG, "checkAndUpdatePermissions: fineLocation=" + fineGranted
+                    + ", coarseLocation=" + coarseGranted);
 
+            if (fineGranted || coarseGranted) {
                 // Enable the MyLocation layer of Google Map
                 mMap.setMyLocationEnabled(true);
-
-                // Optionally move the camera to last known or default location:
-                //   (You could retrieve it from FusedLocationProvider or similar).
-                // Here, just leaving it on default.
-                // If you want to center on the user as soon as it loads, do something like:
-                /*
-                FusedLocationProviderClient fusedLocationClient =
-                    LocationServices.getFusedLocationProviderClient(requireContext());
-                fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
-                    if (location != null) {
-                        LatLng currentLatLng = new LatLng(location.getLatitude(), location.getLongitude());
-                        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, 15f));
-                    }
-                });
-                */
+                Log.e(TAG, "checkAndUpdatePermissions: MyLocation layer enabled");
             } else {
+                Log.e(TAG, "checkAndUpdatePermissions: location permission NOT granted");
                 // If no permission, simply show a default location or prompt for permissions
                 showEdinburghAndMessage("Permission not granted. Please enable in settings.");
             }
         } else {
+            Log.e(TAG, "checkAndUpdatePermissions: GNSS is disabled");
             // If GNSS is disabled, show University of Edinburgh + message
             showEdinburghAndMessage("GNSS is disabled. Please enable in settings.");
         }

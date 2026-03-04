@@ -15,8 +15,10 @@ import com.openpositioning.PositionMe.presentation.fragment.MeasurementsFragment
 public class Wifi {
     private String ssid;
     private long bssid;
+    private String bssidString;
     private int level;
     private long frequency;
+    private boolean rttEnabled;
 
     /**
      * Empty public default constructor of the Wifi object.
@@ -28,16 +30,20 @@ public class Wifi {
      */
     public String getSsid() { return ssid; }
     public long getBssid() { return bssid; }
+    public String getBssidString() { return bssidString; }
     public int getLevel() { return level; }
     public long getFrequency() { return frequency; }
+    public boolean isRttEnabled() { return rttEnabled; }
 
     /**
      * Setters for each property
      */
     public void setSsid(String ssid) { this.ssid = ssid; }
     public void setBssid(long bssid) { this.bssid = bssid; }
+    public void setBssidString(String bssidString) { this.bssidString = bssidString; }
     public void setLevel(int level) { this.level = level; }
     public void setFrequency(long frequency) { this.frequency = frequency; }
+    public void setRttEnabled(boolean rttEnabled) { this.rttEnabled = rttEnabled; }
 
     /**
      * Generates a string containing mac address and rssi of Wifi.

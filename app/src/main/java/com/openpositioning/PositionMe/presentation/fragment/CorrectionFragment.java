@@ -3,6 +3,7 @@ package com.openpositioning.PositionMe.presentation.fragment;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -13,6 +14,7 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.fragment.app.Fragment;
 
@@ -20,6 +22,7 @@ import com.openpositioning.PositionMe.R;
 import com.openpositioning.PositionMe.presentation.activity.RecordingActivity;
 import com.openpositioning.PositionMe.sensors.SensorFusion;
 import com.openpositioning.PositionMe.utils.PathView;
+import com.openpositioning.PositionMe.utils.TrajectoryValidator;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
@@ -62,8 +65,8 @@ public class CorrectionFragment extends Fragment {
         }
         View rootView = inflater.inflate(R.layout.fragment_correction, container, false);
 
-        // Send trajectory data to the cloud
-        sensorFusion.sendTrajectoryToCloud();
+        // Validate trajectory quality before uploading
+        validateAndUpload();
 
         //Obtain start position
         float[] startPosition = sensorFusion.getGNSSLatitude(true);
@@ -157,5 +160,51 @@ public class CorrectionFragment extends Fragment {
 
     public void setScalingRatio(float scalingRatio) {
         this.scalingRatio = scalingRatio;
+    }
+
+    /**
+     * Runs pre-upload quality validation and either uploads directly (if clean)
+     * or shows a warning dialog letting the user choose to proceed or cancel.
+     */
+    private void validateAndUpload() {
+        TrajectoryValidator.ValidationResult result = sensorFusion.validateTrajectory();
+
+        if (result.isClean()) {
+            // All checks passed — upload immediately
+            Log.i("CorrectionFragment", "Trajectory validation passed, uploading");
+            sensorFusion.sendTrajectoryToCloud();
+            return;
+        }
+
+        String summary = result.buildSummary();
+        Log.w("CorrectionFragment", "Trajectory quality issues:\n" + summary);
+
+        if (!result.isPassed()) {
+            // Blocking errors exist — warn strongly but still allow upload
+            new AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.validation_error_title)
+                    .setMessage(getString(R.string.validation_error_message, summary))
+                    .setPositiveButton(R.string.upload_anyway, (dialog, which) -> {
+                        sensorFusion.sendTrajectoryToCloud();
+                    })
+                    .setNegativeButton(R.string.cancel_upload, (dialog, which) -> {
+                        dialog.dismiss();
+                    })
+                    .setCancelable(false)
+                    .show();
+        } else {
+            // Only warnings — show lighter dialog
+            new AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.validation_warning_title)
+                    .setMessage(getString(R.string.validation_warning_message, summary))
+                    .setPositiveButton(R.string.upload_anyway, (dialog, which) -> {
+                        sensorFusion.sendTrajectoryToCloud();
+                    })
+                    .setNegativeButton(R.string.cancel_upload, (dialog, which) -> {
+                        dialog.dismiss();
+                    })
+                    .setCancelable(false)
+                    .show();
+        }
     }
 }
