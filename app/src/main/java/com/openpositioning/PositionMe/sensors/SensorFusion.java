@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import com.openpositioning.PositionMe.positioning.FusionManager;
 
 /**
  * The SensorFusion class is the main data gathering and processing class of the application.
@@ -645,6 +646,7 @@ public class SensorFusion implements SensorEventListener {
             state.latitude = (float) location.getLatitude();
             state.longitude = (float) location.getLongitude();
             recorder.addGnssData(location);
+            FusionManager.getInstance().onGnss(location.getLatitude(), location.getLongitude());
         }
     }
 

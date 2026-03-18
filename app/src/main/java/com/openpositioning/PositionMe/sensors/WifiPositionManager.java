@@ -10,6 +10,7 @@ import org.json.JSONObject;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import com.openpositioning.PositionMe.positioning.FusionManager;
 
 /**
  * Manages WiFi scan result processing and WiFi-based positioning requests.
@@ -51,7 +52,7 @@ public class WifiPositionManager implements Observer {
     public void update(Object[] wifiList) {
         this.wifiList = Stream.of(wifiList).map(o -> (Wifi) o).collect(Collectors.toList());
         recorder.addWifiFingerprint(this.wifiList);
-        createWifiPositioningRequest();
+        createWifiPositionRequestCallback();
     }
 
     /**
@@ -86,6 +87,7 @@ public class WifiPositionManager implements Observer {
                 @Override
                 public void onSuccess(LatLng wifiLocation, int floor) {
                     // Handle the success response
+                    createWifiPositionRequestCallback();
                 }
 
                 @Override

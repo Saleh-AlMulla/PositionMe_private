@@ -12,6 +12,7 @@ import com.openpositioning.PositionMe.utils.PdrProcessing;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import com.openpositioning.PositionMe.positioning.FusionManager;
 
 /**
  * Handles sensor event dispatching for all registered movement sensors.
@@ -172,6 +173,9 @@ public class SensorEventHandler {
                     );
 
                     this.accelMagnitude.clear();
+                    FusionManager.getInstance().onStep(          // ADD THIS
+                            pdrProcessing.getAverageStepLength(),    // ADD THIS
+                            state.orientation[0]); //
 
                     if (recorder.isRecording()) {
                         this.pathView.drawTrajectory(newCords);
