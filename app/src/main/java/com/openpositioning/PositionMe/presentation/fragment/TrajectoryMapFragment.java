@@ -442,7 +442,6 @@ public class TrajectoryMapFragment extends Fragment {
         }
     }
 
-
     /**
      * Remove GNSS marker if user toggles it off
      */
