@@ -224,6 +224,11 @@ public class MapMatchingEngine {
                 p.setX(newX);
                 p.setY(newY);
             }
+
+/*            Log.d(TAG, "Predict: particles=" + particles.size()
+                    + " pos=" + getEstimatedPosition()
+                    + " floor=" + getEstimatedFloor());*/
+            
         }
 
         // Check for floor transitions based on elevation change
