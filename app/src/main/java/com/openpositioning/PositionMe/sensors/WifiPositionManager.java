@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.openpositioning.PositionMe.mapmatching.MapMatchingEngine;
+
 /**
  * Manages WiFi scan result processing and WiFi-based positioning requests.
  *
@@ -66,6 +68,16 @@ public class WifiPositionManager implements Observer {
             JSONObject wifiFingerPrint = new JSONObject();
             wifiFingerPrint.put(WIFI_FINGERPRINT, wifiAccessPoints);
             this.wiFiPositioning.request(wifiFingerPrint);
+
+            // Feed WiFi position to map matching engine
+            LatLng wifiPos = this.wiFiPositioning.getWifiLocation();
+            int wifiFloor = this.wiFiPositioning.getFloor();
+            if (wifiPos != null) {
+                MapMatchingEngine engine = SensorFusion.getInstance().getMapMatchingEngine();
+                if (engine != null && engine.isActive()) {
+                    engine.updateWifi(wifiPos.latitude, wifiPos.longitude, wifiFloor, 10.0f);
+                }
+            }
         } catch (JSONException e) {
             Log.e("jsonErrors", "Error creating json object" + e.toString());
         }

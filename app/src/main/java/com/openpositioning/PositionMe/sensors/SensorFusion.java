@@ -32,6 +32,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.openpositioning.PositionMe.mapmatching.MapMatchingEngine;
+
 /**
  * The SensorFusion class is the main data gathering and processing class of the application.
  *
@@ -87,6 +89,8 @@ public class SensorFusion implements SensorEventListener {
     // PDR and path
     private PdrProcessing pdrProcessing;
     private PathView pathView;
+
+    private final MapMatchingEngine mapMatchingEngine = new MapMatchingEngine();
 
     // Sensor registration latency setting
     long maxReportLatencyNs = 0;
@@ -162,7 +166,7 @@ public class SensorFusion implements SensorEventListener {
 
         long bootTime = SystemClock.uptimeMillis();
         this.eventHandler = new SensorEventHandler(
-                state, pdrProcessing, pathView, recorder, bootTime);
+                state, pdrProcessing, pathView, recorder, bootTime, mapMatchingEngine);
 
         // Register WiFi observer on WifiPositionManager (not on SensorFusion)
         this.wifiProcessor = new WifiDataProcessor(context);
@@ -480,6 +484,23 @@ public class SensorFusion implements SensorEventListener {
             latLong = state.startLocation;
         }
         return latLong;
+    }
+
+    /**
+     * Returns the map matching particle filter engine.
+     */
+    public MapMatchingEngine getMapMatchingEngine() {
+        return mapMatchingEngine;
+    }
+
+    /**
+     * Initialises map matching with current position and building data.
+     * Called when user starts recording inside a building.
+     */
+    public void initialiseMapMatching(double lat, double lng, int floor,
+                                      float floorHeight,
+                                      java.util.List<FloorplanApiClient.FloorShapes> shapes) {
+        mapMatchingEngine.initialise(lat, lng, floor, floorHeight, shapes);
     }
 
     /**

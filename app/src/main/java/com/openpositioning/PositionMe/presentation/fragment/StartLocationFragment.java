@@ -37,6 +37,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.openpositioning.PositionMe.data.remote.FloorplanApiClient;
+
 /**
  * Fragment for selecting the start location before recording begins.
  * Displays a Google Map with building outlines fetched from the floorplan API.
@@ -473,6 +475,27 @@ public class StartLocationFragment extends Fragment {
                 sensorFusion.setStartGNSSLatitude(startPosition);
                 // Write trajectory_id, initial_position and initial heading to protobuf
                 sensorFusion.writeInitialMetadata();
+
+                // Initialise particle filter if inside a known building
+                if (selectedBuildingId != null) {
+                    FloorplanApiClient.BuildingInfo building =
+                            sensorFusion.getFloorplanBuilding(selectedBuildingId);
+                    if (building != null) {
+                        int startFloor = sensorFusion.getWifiFloor();
+                        float floorHeight = 4.0f;
+                        switch (selectedBuildingId) {
+                            case "nucleus_building": floorHeight = 4.2f; break;
+                            case "library":          floorHeight = 3.6f; break;
+                            case "murchison_house":  floorHeight = 4.0f; break;
+                        }
+                        sensorFusion.initialiseMapMatching(
+                                startPosition[0], startPosition[1],
+                                startFloor, floorHeight,
+                                building.getFloorShapesList()
+                        );
+                        Log.d(TAG, "Map matching initialised for " + selectedBuildingId);
+                    }
+                }
 
                 // Switch to the recording screen
                 ((RecordingActivity) requireActivity()).showRecordingScreen();
