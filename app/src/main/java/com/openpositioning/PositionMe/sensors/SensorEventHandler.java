@@ -173,9 +173,12 @@ public class SensorEventHandler {
                     );
 
                     this.accelMagnitude.clear();
-                    FusionManager.getInstance().onStep(          // ADD THIS
-                            pdrProcessing.getAverageStepLength(),    // ADD THIS
-                            state.orientation[0]); //
+
+                    float avgStepLength = pdrProcessing.getAverageStepLength();
+                    float heading = state.orientation[0];
+                    if (!Float.isNaN(avgStepLength) && avgStepLength > 0.05f && !Float.isNaN(heading)) {
+                        FusionManager.getInstance().onStep(avgStepLength, heading);
+                    }
 
                     if (recorder.isRecording()) {
                         this.pathView.drawTrajectory(newCords);

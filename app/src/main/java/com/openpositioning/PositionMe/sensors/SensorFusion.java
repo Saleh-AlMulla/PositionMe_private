@@ -327,6 +327,7 @@ public class SensorFusion implements SensorEventListener {
      * @see SensorCollectionService
      */
     public void startRecording() {
+        FusionManager.getInstance().reset();
         recorder.startRecording(pdrProcessing);
         eventHandler.resetBootTime(recorder.getBootTime());
 
@@ -646,7 +647,10 @@ public class SensorFusion implements SensorEventListener {
             state.latitude = (float) location.getLatitude();
             state.longitude = (float) location.getLongitude();
             recorder.addGnssData(location);
-            FusionManager.getInstance().onGnss(location.getLatitude(), location.getLongitude());
+            FusionManager.getInstance().onGnss(
+                    location.getLatitude(),
+                    location.getLongitude(),
+                    location.getAccuracy());
         }
     }
 

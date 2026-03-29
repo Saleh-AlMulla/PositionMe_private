@@ -76,6 +76,9 @@ public class WifiPositionManager implements Observer {
      * Creates a WiFi positioning request using the Volley callback pattern.
      */
     private void createWifiPositionRequestCallback() {
+        if (this.wifiList == null || this.wifiList.isEmpty()) {
+            return;
+        }
         try {
             JSONObject wifiAccessPoints = new JSONObject();
             for (Wifi data : this.wifiList) {
@@ -86,13 +89,17 @@ public class WifiPositionManager implements Observer {
             this.wiFiPositioning.request(wifiFingerPrint, new WiFiPositioning.VolleyCallback() {
                 @Override
                 public void onSuccess(LatLng wifiLocation, int floor) {
-                    // Handle the success response
-                    createWifiPositionRequestCallback();
+                    if (wifiLocation != null) {
+                        FusionManager.getInstance().onWifi(
+                                wifiLocation.latitude,
+                                wifiLocation.longitude
+                        );
+                    }
                 }
 
                 @Override
                 public void onError(String message) {
-                    // Handle the error response
+                    Log.e("WifiPositionManager", "WiFi positioning failed: " + message);
                 }
             });
         } catch (JSONException e) {
