@@ -12,6 +12,7 @@ import com.openpositioning.PositionMe.utils.PdrProcessing;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import com.openpositioning.PositionMe.positioning.FusionManager;
 
 import com.openpositioning.PositionMe.mapmatching.MapMatchingEngine;
 
@@ -189,6 +190,13 @@ public class SensorEventHandler {
                         );
                         state.lastPdrX = newCords[0];
                         state.lastPdrY = newCords[1];
+                    }
+
+                    // Feed step into FusionManager
+                    float avgStepLength = pdrProcessing.getAverageStepLength();
+                    float heading = state.orientation[0];
+                    if (!Float.isNaN(avgStepLength) && avgStepLength > 0.05f && !Float.isNaN(heading)) {
+                        FusionManager.getInstance().onStep(avgStepLength, heading);
                     }
 
                     if (recorder.isRecording()) {

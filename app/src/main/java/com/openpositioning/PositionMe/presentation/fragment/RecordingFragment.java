@@ -18,7 +18,6 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import android.util.Log;
 import com.google.android.material.button.MaterialButton;
 
 import androidx.annotation.NonNull;
@@ -35,9 +34,9 @@ import com.google.android.gms.maps.model.LatLng;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Arrays;
 
 import android.widget.Toast;
+import com.openpositioning.PositionMe.positioning.FusionManager;
 
 
 
@@ -89,43 +88,11 @@ public class RecordingFragment extends Fragment {
     // References to the child map fragment
     private TrajectoryMapFragment trajectoryMapFragment;
 
-    // -------------------------------------------------------------------------
-    // REFRESH LOOP (NEW: WiFi call added here)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Repeating Runnable that drives all real-time UI and map updates at ~200ms intervals.
-     *
-     * WHY WiFi IS CALLED HERE (not inside updateUIandPosition):
-     * WiFi positioning is handled separately from PDR/GNSS because it comes from a network
-     * API call (openpositioning) rather than a local sensor. It is logically a distinct
-     * data source and keeps updateUIandPosition() focused on sensor data only.
-     *
-     * GRACEFUL NULL HANDLING:
-     * sensorFusion.getLatLngWifiPositioning() returns null whenever:
-     *   (a) the WiFi API returned HTTP 404 (building not registered / outside range), or
-     *   (b) the API call has not completed yet.
-     * Before this fix, the null case was silently ignored with no feedback.
-     * Now it logs "WiFi positioning unavailable" so you can see in logcat exactly when
-     * WiFi kicks in (the log stops appearing) vs when it is failing (it keeps appearing).
-     */
-
     private final Runnable refreshDataTask = new Runnable() {
         @Override
         public void run() {
             updateUIandPosition();
-            // NEW: Feed WiFi positioning result to the map if available
-            LatLng wifiLocation = sensorFusion.getLatLngWifiPositioning();
-            if (wifiLocation != null && trajectoryMapFragment != null) {
-                // WiFi API returned a valid fix — display a green marker on the map
-                Log.d("DisplayDebug", "Calling updateWifiObservation()");
-                trajectoryMapFragment.updateWifiObservation(wifiLocation);
-            } else {
-                // WiFi unavailable: either 404, out of range, or API not yet responded.
-                // This is expected outside the Nucleus/Library buildings.
-                Log.d("DisplayDebug", "WiFi positioning unavailable (null) — skipping updateWifiObservation");
-            }
-            // Schedule the next refresh cycle
+            // Loop again
             refreshDataHandler.postDelayed(refreshDataTask, 200);
         }
     };
@@ -287,7 +254,6 @@ public class RecordingFragment extends Fragment {
      */
     private void updateUIandPosition() {
         float[] pdrValues = sensorFusion.getSensorValueMap().get(SensorTypes.PDR);
-        Log.d("DisplayDebug", "PDR values = " + Arrays.toString(pdrValues));
         if (pdrValues == null) return;
 
         // Distance
@@ -303,44 +269,42 @@ public class RecordingFragment extends Fragment {
         // Convert PDR coordinates to actual LatLng if you have a known starting lat/lon
         // Or simply pass relative data for the TrajectoryMapFragment to handle
         // For example:
-        float[] latLngArray = sensorFusion.getGNSSLatitude(true);
-        if (latLngArray != null) {
-            LatLng oldLocation = trajectoryMapFragment.getCurrentLocation(); // or store locally
-            LatLng newLocation = UtilFunctions.calculateNewPos(
-                    oldLocation == null ? new LatLng(latLngArray[0], latLngArray[1]) : oldLocation,
-                    new float[]{ pdrValues[0] - previousPosX, pdrValues[1] - previousPosY }
-            );
-
-            Log.d("DisplayDebug", "PDR newLocation = " + newLocation);
-
-            // Pass the location + orientation to the map
+        // Use fused position if available, otherwise fall back to PDR
+        double[] fusedPos = FusionManager.getInstance().getBestPosition();
+        if (fusedPos != null) {
+            LatLng newLocation = new LatLng(fusedPos[0], fusedPos[1]);
             if (trajectoryMapFragment != null) {
-                Log.d("DisplayDebug", "Calling updateUserLocation()");
                 trajectoryMapFragment.updateUserLocation(newLocation,
                         (float) Math.toDegrees(sensorFusion.passOrientation()));
-                Log.d("DisplayDebug", "Calling updatePdrObservation()");
-                trajectoryMapFragment.updatePdrObservation(newLocation);
+            }
+        } else {
+            // Fallback to raw PDR until fusion is initialised
+            float[] latLngArray = sensorFusion.getGNSSLatitude(true);
+            if (latLngArray != null) {
+                LatLng oldLocation = trajectoryMapFragment.getCurrentLocation();
+                LatLng newLocation = UtilFunctions.calculateNewPos(
+                        oldLocation == null ? new LatLng(latLngArray[0], latLngArray[1]) : oldLocation,
+                        new float[]{ pdrValues[0] - previousPosX, pdrValues[1] - previousPosY }
+                );
+                if (trajectoryMapFragment != null) {
+                    trajectoryMapFragment.updateUserLocation(newLocation,
+                            (float) Math.toDegrees(sensorFusion.passOrientation()));
+                }
             }
         }
-
         // GNSS logic if you want to show GNSS error, etc.
         float[] gnss = sensorFusion.getSensorValueMap().get(SensorTypes.GNSSLATLONG);
-        Log.d("DisplayDebug", "GNSS raw = " + Arrays.toString(gnss));
-
         if (gnss != null && trajectoryMapFragment != null) {
             // If user toggles showing GNSS in the map, call e.g.
             if (trajectoryMapFragment.isGnssEnabled()) {
                 LatLng gnssLocation = new LatLng(gnss[0], gnss[1]);
-                Log.d("DisplayDebug", "GNSS LatLng = " + gnssLocation);
                 LatLng currentLoc = trajectoryMapFragment.getCurrentLocation();
                 if (currentLoc != null) {
                     double errorDist = UtilFunctions.distanceBetweenPoints(currentLoc, gnssLocation);
-                    Log.d("DisplayDebug", "gnssError showing: dist=" + String.format("%.2f", errorDist) + "m");
                     gnssError.setVisibility(View.VISIBLE);
                     gnssError.setText(String.format(getString(R.string.gnss_error) + "%.2fm", errorDist));
                 }
                 trajectoryMapFragment.updateGNSS(gnssLocation);
-                Log.d("DisplayDebug", "Calling updateGNSS()");
             } else {
                 gnssError.setVisibility(View.GONE);
                 trajectoryMapFragment.clearGNSS();
