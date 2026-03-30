@@ -270,12 +270,14 @@ public class RecordingFragment extends Fragment {
         // Or simply pass relative data for the TrajectoryMapFragment to handle
         // For example:
         // Use fused position if available, otherwise fall back to PDR
+        // Use fused position if available, otherwise fall back to PDR
         double[] fusedPos = FusionManager.getInstance().getBestPosition();
         if (fusedPos != null) {
             LatLng newLocation = new LatLng(fusedPos[0], fusedPos[1]);
             if (trajectoryMapFragment != null) {
                 trajectoryMapFragment.updateUserLocation(newLocation,
                         (float) Math.toDegrees(sensorFusion.passOrientation()));
+                trajectoryMapFragment.updatePdrObservation(newLocation);
             }
         } else {
             // Fallback to raw PDR until fusion is initialised
@@ -289,9 +291,11 @@ public class RecordingFragment extends Fragment {
                 if (trajectoryMapFragment != null) {
                     trajectoryMapFragment.updateUserLocation(newLocation,
                             (float) Math.toDegrees(sensorFusion.passOrientation()));
+                    trajectoryMapFragment.updatePdrObservation(newLocation);
                 }
             }
         }
+        
         // GNSS logic if you want to show GNSS error, etc.
         float[] gnss = sensorFusion.getSensorValueMap().get(SensorTypes.GNSSLATLONG);
         if (gnss != null && trajectoryMapFragment != null) {
