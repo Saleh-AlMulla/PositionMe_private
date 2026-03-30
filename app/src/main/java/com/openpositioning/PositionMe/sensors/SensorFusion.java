@@ -503,6 +503,17 @@ public class SensorFusion implements SensorEventListener {
                                       float floorHeight,
                                       java.util.List<FloorplanApiClient.FloorShapes> shapes) {
         mapMatchingEngine.initialise(lat, lng, floor, floorHeight, shapes);
+
+        // Reset PDR baseline so the first predict() after init doesn't
+        // compute a giant step from accumulated PDR history.
+        float[] currentPdr = pdrProcessing.getPDRMovement();
+        if (currentPdr != null) {
+            state.lastPdrX = currentPdr[0];
+            state.lastPdrY = currentPdr[1];
+        } else {
+            state.lastPdrX = 0;
+            state.lastPdrY = 0;
+        }
     }
 
     /**

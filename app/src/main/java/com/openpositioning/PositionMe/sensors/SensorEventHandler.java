@@ -188,9 +188,12 @@ public class SensorEventHandler {
                                 state.orientation[0],
                                 state.elevation
                         );
-                        state.lastPdrX = newCords[0];
-                        state.lastPdrY = newCords[1];
+
                     }
+                    // Always update regardless of engine state — prevents a large stepLen
+                    // spike on the first predict() call after the engine initialises
+                    state.lastPdrX = newCords[0];
+                    state.lastPdrY = newCords[1];
 
                     // Feed step into FusionManager
                     float avgStepLength = pdrProcessing.getAverageStepLength();
