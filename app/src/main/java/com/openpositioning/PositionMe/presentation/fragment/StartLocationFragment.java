@@ -299,17 +299,10 @@ public class StartLocationFragment extends Fragment {
         // Store building selection
         selectedBuildingId = buildingName;
 
-        // Compute building centre from polygon points
+        // Compute building centre for camera zoom only
         LatLng center = computePolygonCenter(polygon);
 
-        // Move the marker to building centre
-        if (startMarker != null) {
-            startMarker.setPosition(center);
-        }
-        startPosition[0] = (float) center.latitude;
-        startPosition[1] = (float) center.longitude;
-
-        // Zoom to the building
+        // Keep marker at user's actual position, don't move to building centre
         mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(center, 20f));
 
         // Show floor plan overlay for the selected building
@@ -473,7 +466,6 @@ public class StartLocationFragment extends Fragment {
                 // Start sensor recording + set the start location
                 sensorFusion.startRecording();
                 sensorFusion.setStartGNSSLatitude(startPosition);
-                // Write trajectory_id, initial_position and initial heading to protobuf
                 sensorFusion.writeInitialMetadata();
 
                 // Initialise particle filter if inside a known building
@@ -493,6 +485,7 @@ public class StartLocationFragment extends Fragment {
                                 startFloor, floorHeight,
                                 building.getFloorShapesList()
                         );
+                        sensorFusion.getMapMatchingEngine().logWallStats();
                         Log.d(TAG, "Map matching initialised for " + selectedBuildingId);
                     }
                 }

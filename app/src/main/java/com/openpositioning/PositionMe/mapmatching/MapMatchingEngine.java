@@ -136,6 +136,29 @@ public class MapMatchingEngine {
                 + lat + ", " + lng + ") floor " + floor);
     }
 
+    public void logWallStats() {
+        if (floorShapes == null) {
+            Log.d(TAG, "No floor shapes loaded");
+            return;
+        }
+        for (int f = 0; f < floorShapes.size(); f++) {
+            int wallSegments = 0;
+            int stairFeatures = 0;
+            int liftFeatures = 0;
+            for (FloorplanApiClient.MapShapeFeature feature : floorShapes.get(f).getFeatures()) {
+                String type = feature.getIndoorType();
+                if ("wall".equals(type)) {
+                    for (List<LatLng> part : feature.getParts()) {
+                        wallSegments += part.size() - 1;
+                    }
+                } else if ("stairs".equals(type)) stairFeatures++;
+                else if ("lift".equals(type)) liftFeatures++;
+            }
+            Log.d(TAG, "Floor " + f + ": " + wallSegments + " wall segments, "
+                    + stairFeatures + " stair features, " + liftFeatures + " lift features");
+        }
+    }
+
     /**
      * Returns whether the engine has been initialised and is active.
      */

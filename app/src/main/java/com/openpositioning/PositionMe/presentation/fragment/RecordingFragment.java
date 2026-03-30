@@ -85,6 +85,8 @@ public class RecordingFragment extends Fragment {
     private float previousPosX = 0f;
     private float previousPosY = 0f;
 
+    private LatLng rawPdrPosition = null;
+
     // References to the child map fragment
     private TrajectoryMapFragment trajectoryMapFragment;
 
@@ -265,41 +267,56 @@ public class RecordingFragment extends Fragment {
         float elevationVal = sensorFusion.getElevation();
         elevation.setText(getString(R.string.elevation, String.format("%.1f", elevationVal)));
 
-        // Current location
-        // Convert PDR coordinates to actual LatLng if you have a known starting lat/lon
-        // Or simply pass relative data for the TrajectoryMapFragment to handle
-        // For example:
-        // Use fused position if available, otherwise fall back to PDR
-        // Use fused position if available, otherwise fall back to PDR
-        double[] fusedPos = FusionManager.getInstance().getBestPosition();
-        if (fusedPos != null) {
-            LatLng newLocation = new LatLng(fusedPos[0], fusedPos[1]);
-            if (trajectoryMapFragment != null) {
-                trajectoryMapFragment.updateUserLocation(newLocation,
-                        (float) Math.toDegrees(sensorFusion.passOrientation()));
-                trajectoryMapFragment.updatePdrObservation(newLocation);
+        // Compute raw PDR position independently for the red trace
+        float[] latLngArray = sensorFusion.getGNSSLatitude(true);
+        if (latLngArray != null) {
+            if (rawPdrPosition == null) {
+                rawPdrPosition = new LatLng(latLngArray[0], latLngArray[1]);
             }
-        } else {
-            // Fallback to raw PDR until fusion is initialised
-            float[] latLngArray = sensorFusion.getGNSSLatitude(true);
-            if (latLngArray != null) {
-                LatLng oldLocation = trajectoryMapFragment.getCurrentLocation();
-                LatLng newLocation = UtilFunctions.calculateNewPos(
-                        oldLocation == null ? new LatLng(latLngArray[0], latLngArray[1]) : oldLocation,
-                        new float[]{ pdrValues[0] - previousPosX, pdrValues[1] - previousPosY }
-                );
-                if (trajectoryMapFragment != null) {
-                    trajectoryMapFragment.updateUserLocation(newLocation,
-                            (float) Math.toDegrees(sensorFusion.passOrientation()));
-                    trajectoryMapFragment.updatePdrObservation(newLocation);
-                }
+            rawPdrPosition = UtilFunctions.calculateNewPos(
+                    rawPdrPosition,
+                    new float[]{ pdrValues[0] - previousPosX, pdrValues[1] - previousPosY }
+            );
+        }
+
+        // Draw raw PDR on the red polyline
+        if (rawPdrPosition != null && trajectoryMapFragment != null) {
+            trajectoryMapFragment.addRawPdrPoint(rawPdrPosition);
+        }
+
+        // Best position: prefer MapMatchingEngine (wall-aware) > FusionManager > raw PDR
+        LatLng fusedLocation = null;
+
+        // First choice: map-matched position (has wall constraints)
+        com.openpositioning.PositionMe.mapmatching.MapMatchingEngine mmEngine =
+                sensorFusion.getMapMatchingEngine();
+        if (mmEngine != null && mmEngine.isActive()) {
+            fusedLocation = mmEngine.getEstimatedPosition();
+        }
+
+        // Second choice: FusionManager (WiFi/GNSS corrections, no walls)
+        if (fusedLocation == null) {
+            double[] fusedPos = FusionManager.getInstance().getBestPosition();
+            if (fusedPos != null) {
+                fusedLocation = new LatLng(fusedPos[0], fusedPos[1]);
             }
         }
-        
-        // GNSS logic if you want to show GNSS error, etc.
+
+        // Display the best available position
+        if (fusedLocation != null && trajectoryMapFragment != null) {
+            trajectoryMapFragment.updateUserLocation(fusedLocation,
+                    (float) Math.toDegrees(sensorFusion.passOrientation()));
+            trajectoryMapFragment.updatePdrObservation(fusedLocation);
+        } else if (rawPdrPosition != null && trajectoryMapFragment != null) {
+            // Fallback: raw PDR before any fusion is ready
+            trajectoryMapFragment.updateUserLocation(rawPdrPosition,
+                    (float) Math.toDegrees(sensorFusion.passOrientation()));
+            trajectoryMapFragment.updatePdrObservation(rawPdrPosition);
+        }
+
+        // GNSS logic
         float[] gnss = sensorFusion.getSensorValueMap().get(SensorTypes.GNSSLATLONG);
         if (gnss != null && trajectoryMapFragment != null) {
-            // If user toggles showing GNSS in the map, call e.g.
             if (trajectoryMapFragment.isGnssEnabled()) {
                 LatLng gnssLocation = new LatLng(gnss[0], gnss[1]);
                 LatLng currentLoc = trajectoryMapFragment.getCurrentLocation();

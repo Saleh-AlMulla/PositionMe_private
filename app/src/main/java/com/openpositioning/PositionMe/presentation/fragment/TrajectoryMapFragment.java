@@ -112,7 +112,7 @@ public class TrajectoryMapFragment extends Fragment {
      * The "last N observations" requirement in the assignment brief (section 3.3) is
      * satisfied by these caps: old markers are automatically removed as new ones appear.
      */
-    private static final int MAX_PDR_OBSERVATIONS = 6;
+    private static final int MAX_PDR_OBSERVATIONS = 3;
     private static final int MAX_GNSS_OBSERVATIONS = 5;
     private static final int MAX_WIFI_OBSERVATIONS = 5;
 
@@ -167,7 +167,7 @@ public class TrajectoryMapFragment extends Fragment {
      * noise is larger in scale than PDR noise.
      */
 
-    private static final double PDR_OBSERVATION_MIN_DISTANCE_M = 1.0;
+    private static final double PDR_OBSERVATION_MIN_DISTANCE_M = 3.0;
 
 
     // -------------------------------------------------------------------------
@@ -478,20 +478,19 @@ public class TrajectoryMapFragment extends Fragment {
             polyline.setPoints(points);
         }*/
         // Extend polyline
-        if (polyline != null) {
-            List<LatLng> points = new ArrayList<>(polyline.getPoints());
-
-            // First position fix: add the first polyline point
-            if (oldLocation == null) {
-                points.add(newLocation);
-                polyline.setPoints(points);
-            } else if (!oldLocation.equals(newLocation)) {
-                // Subsequent movement: append a new polyline point
-                points.add(newLocation);
-                polyline.setPoints(points);
-            }
-        }
-
+//        if (polyline != null) {
+//            List<LatLng> points = new ArrayList<>(polyline.getPoints());
+//
+//            // First position fix: add the first polyline point
+//            if (oldLocation == null) {
+//                points.add(newLocation);
+//                polyline.setPoints(points);
+//            } else if (!oldLocation.equals(newLocation)) {
+//                // Subsequent movement: append a new polyline point
+//                points.add(newLocation);
+//                polyline.setPoints(points);
+//            }
+//        }
 
         // Update indoor map overlay
         if (indoorMapManager != null) {
@@ -692,6 +691,17 @@ public class TrajectoryMapFragment extends Fragment {
             points.add(pdrLocation);
             pdrTrajectoryPolyline.setPoints(points);
         }
+    }
+
+    /**
+     * Adds a point to the raw PDR polyline (red) without moving the camera or marker.
+     * Shows the unfiltered PDR path for comparison against the fused trajectory.
+     */
+    public void addRawPdrPoint(@NonNull LatLng point) {
+        if (polyline == null) return;
+        List<LatLng> points = new ArrayList<>(polyline.getPoints());
+        points.add(point);
+        polyline.setPoints(points);
     }
 
     // -------------------------------------------------------------------------
