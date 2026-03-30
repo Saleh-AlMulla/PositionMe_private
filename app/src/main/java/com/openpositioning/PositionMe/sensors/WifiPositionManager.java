@@ -18,8 +18,8 @@ import com.openpositioning.PositionMe.positioning.FusionManager;
  * Manages WiFi scan result processing and WiFi-based positioning requests.
  *
  * <p>Implements {@link Observer} to receive updates from {@link WifiDataProcessor}.
- * On each WiFi scan result, it fires a positioning request and feeds the result
- * into both {@link FusionManager} and {@link MapMatchingEngine}.</p>
+ * On each WiFi scan result, fires a positioning request and feeds the result into
+ * both {@link FusionManager} and {@link MapMatchingEngine}.</p>
  *
  * @see WifiDataProcessor the observable that triggers WiFi scan updates
  * @see WiFiPositioning   the API client for WiFi-based positioning
@@ -87,15 +87,13 @@ public class WifiPositionManager implements Observer {
                     );
 
                     // Feed into MapMatchingEngine (wall-aware filter)
-                    // This was previously missing — WiFi corrections were never
-                    // reaching the map matching engine.
                     MapMatchingEngine engine = SensorFusion.getInstance().getMapMatchingEngine();
                     if (engine != null && engine.isActive()) {
                         engine.updateWifi(
                                 wifiLocation.latitude,
                                 wifiLocation.longitude,
                                 floor,
-                                10.0f
+                                5.0f
                         );
                     }
 
