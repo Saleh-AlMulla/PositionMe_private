@@ -42,7 +42,7 @@ import com.openpositioning.PositionMe.positioning.FusionManager;
  *   <li>{@link SensorState} &ndash; shared sensor data holder</li>
  *   <li>{@link SensorEventHandler} &ndash; sensor event dispatch (switch logic)</li>
  *   <li>{@link TrajectoryRecorder} &ndash; recording lifecycle &amp; protobuf construction</li>
- *   <li>{@link WifiPositionManager} &ndash; WiFi scan processing &amp; positioning</li>
+ *   <li>{@link WifiPositionManager} &ndash; WiFi scan processing &amp; com.openpositioning.PositionMe.positioning</li>
  * </ul>
  *
  * <p>The public API is unchanged &ndash; all external callers continue to use
@@ -608,7 +608,7 @@ public class SensorFusion implements SensorEventListener {
     }
 
     /**
-     * Returns the user position obtained using WiFi positioning.
+     * Returns the user position obtained using WiFi com.openpositioning.PositionMe.positioning.
      *
      * @return {@link LatLng} corresponding to user's position.
      */
@@ -617,7 +617,7 @@ public class SensorFusion implements SensorEventListener {
     }
 
     /**
-     * Returns the current floor the user is on, obtained using WiFi positioning.
+     * Returns the current floor the user is on, obtained using WiFi com.openpositioning.PositionMe.positioning.
      *
      * @return current floor number.
      */

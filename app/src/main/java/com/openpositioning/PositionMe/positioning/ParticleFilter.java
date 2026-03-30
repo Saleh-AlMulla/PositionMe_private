@@ -23,12 +23,13 @@ public class ParticleFilter {
     }
 
     private static final double DEFAULT_INIT_SIGMA = 4.0;
-    private static final double MOTION_NOISE_BASE = 0.20;
-    private static final double MOTION_NOISE_STEP_SCALE = 0.12;
-    private static final double STEP_NOISE_SIGMA = 0.10;
-    private static final double HEADING_NOISE_SIGMA = 0.08;
+    private static final double MOTION_NOISE_BASE = 0.12;
+    private static final double MOTION_NOISE_STEP_SCALE = 0.08;
+    private static final double STEP_NOISE_SIGMA = 0.05;
+    private static final double HEADING_NOISE_SIGMA = 0.05;
     private static final double GNSS_SIGMA_MIN = 3.0;
-    private static final double WIFI_SIGMA_DEFAULT = 6.0;
+    //private static final double WIFI_SIGMA_DEFAULT = 6.0;
+    private static final double WIFI_SIGMA_DEFAULT = 10.0;
 
     private final Random rng = new Random(42);
     private final List<Particle> particles = new ArrayList<>();

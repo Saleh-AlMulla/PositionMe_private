@@ -682,7 +682,7 @@ public class TrajectoryMapFragment extends Fragment {
     }
 
     /**
-     * Evaluates the current floor using WiFi positioning (priority) or
+     * Evaluates the current floor using WiFi com.openpositioning.PositionMe.positioning (priority) or
      * barometric elevation (fallback). Applies a 3-second debounce window
      * to prevent jittery floor switching.
      */
@@ -692,7 +692,7 @@ public class TrajectoryMapFragment extends Fragment {
 
         int candidateFloor;
 
-        // Priority 1: WiFi-based floor (only if WiFi positioning has returned data)
+        // Priority 1: WiFi-based floor (only if WiFi com.openpositioning.PositionMe.positioning has returned data)
         if (sensorFusion.getLatLngWifiPositioning() != null) {
             candidateFloor = sensorFusion.getWifiFloor();
         } else {

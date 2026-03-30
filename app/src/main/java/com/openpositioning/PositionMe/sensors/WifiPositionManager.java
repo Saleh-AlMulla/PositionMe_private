@@ -13,13 +13,13 @@ import java.util.stream.Stream;
 import com.openpositioning.PositionMe.positioning.FusionManager;
 
 /**
- * Manages WiFi scan result processing and WiFi-based positioning requests.
+ * Manages WiFi scan result processing and WiFi-based com.openpositioning.PositionMe.positioning requests.
  *
  * <p>Implements {@link Observer} to receive updates from {@link WifiDataProcessor},
  * replacing the role previously held by {@link SensorFusion}.</p>
  *
  * @see WifiDataProcessor the observable that triggers WiFi scan updates
- * @see WiFiPositioning   the API client for WiFi-based positioning
+ * @see WiFiPositioning   the API client for WiFi-based com.openpositioning.PositionMe.positioning
  */
 public class WifiPositionManager implements Observer {
 
@@ -32,7 +32,7 @@ public class WifiPositionManager implements Observer {
     /**
      * Creates a new WifiPositionManager.
      *
-     * @param wiFiPositioning WiFi positioning API client
+     * @param wiFiPositioning WiFi com.openpositioning.PositionMe.positioning API client
      * @param recorder        trajectory recorder for writing WiFi fingerprints
      */
     public WifiPositionManager(WiFiPositioning wiFiPositioning,
@@ -46,7 +46,7 @@ public class WifiPositionManager implements Observer {
      *
      * <p>Receives updates from {@link WifiDataProcessor}. Converts the raw object array
      * to a typed list, delegates fingerprint recording to {@link TrajectoryRecorder},
-     * and triggers a WiFi positioning request.</p>
+     * and triggers a WiFi com.openpositioning.PositionMe.positioning request.</p>
      */
     @Override
     public void update(Object[] wifiList) {
@@ -73,7 +73,7 @@ public class WifiPositionManager implements Observer {
     }
 
     /**
-     * Creates a WiFi positioning request using the Volley callback pattern.
+     * Creates a WiFi com.openpositioning.PositionMe.positioning request using the Volley callback pattern.
      */
     private void createWifiPositionRequestCallback() {
         if (this.wifiList == null || this.wifiList.isEmpty()) {
@@ -99,7 +99,7 @@ public class WifiPositionManager implements Observer {
 
                 @Override
                 public void onError(String message) {
-                    Log.e("WifiPositionManager", "WiFi positioning failed: " + message);
+                    Log.e("WifiPositionManager", "WiFi com.openpositioning.PositionMe.positioning failed: " + message);
                 }
             });
         } catch (JSONException e) {
@@ -108,7 +108,7 @@ public class WifiPositionManager implements Observer {
     }
 
     /**
-     * Returns the user position obtained using WiFi positioning.
+     * Returns the user position obtained using WiFi com.openpositioning.PositionMe.positioning.
      *
      * @return {@link LatLng} corresponding to the user's position
      */
@@ -117,7 +117,7 @@ public class WifiPositionManager implements Observer {
     }
 
     /**
-     * Returns the current floor the user is on, obtained using WiFi positioning.
+     * Returns the current floor the user is on, obtained using WiFi com.openpositioning.PositionMe.positioning.
      *
      * @return current floor number
      */

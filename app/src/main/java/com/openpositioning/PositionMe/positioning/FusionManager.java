@@ -13,6 +13,9 @@ public class FusionManager {
     private CoordinateUtils coords;
     private boolean ready = false;
 
+    private double[] smoothedLatLon = null;
+    private static final double DISPLAY_SMOOTHING_ALPHA = 0.25;
+
     private FusionManager() {}
 
     public static FusionManager getInstance() {
@@ -23,20 +26,44 @@ public class FusionManager {
         particleFilter = null;
         coords = null;
         ready = false;
+        smoothedLatLon = null;
     }
 
     public synchronized void onGnss(double lat, double lon, float accuracyMeters) {
-        float sigma = accuracyMeters > 0 ? accuracyMeters : 8.0f;
+        float rawAccuracy = accuracyMeters > 0 ? accuracyMeters : 8.0f;
+
+        // Ignore very poor GNSS fixes
+        if (rawAccuracy > 20.0f) {
+            Log.d(TAG, "Ignoring GNSS fix due to poor accuracy: " + rawAccuracy);
+            return;
+        }
+
+        float sigma = Math.max(6.0f, rawAccuracy * 1.5f);
+
         if (!ready) {
             coords = new CoordinateUtils(lat, lon);
             particleFilter = new ParticleFilter(PARTICLE_COUNT);
-            particleFilter.initialise(0.0, 0.0, Math.max(sigma, 4.0f));
+            particleFilter.initialise(0.0, 0.0, Math.max(sigma, 6.0f));
             ready = true;
             Log.d(TAG, "Initialised from GNSS: " + lat + ", " + lon + " acc=" + sigma);
             return;
         }
 
         double[] en = coords.toLocal(lat, lon);
+
+        // Outlier gate: reject fixes far from current predicted estimate
+        double[] est = particleFilter.estimate();
+        if (est != null) {
+            double de = en[0] - est[0];
+            double dn = en[1] - est[1];
+            double dist = Math.sqrt(de * de + dn * dn);
+
+            if (dist > Math.max(18.0, sigma * 2.5)) {
+                Log.d(TAG, "Rejected GNSS outlier. Dist=" + dist + " sigma=" + sigma);
+                return;
+            }
+        }
+
         particleFilter.updateGnss(en[0], en[1], sigma);
     }
 
@@ -44,13 +71,27 @@ public class FusionManager {
         if (!ready) {
             coords = new CoordinateUtils(lat, lon);
             particleFilter = new ParticleFilter(PARTICLE_COUNT);
-            particleFilter.initialise(0.0, 0.0, 6.0);
+            particleFilter.initialise(0.0, 0.0, 8.0);
             ready = true;
             Log.d(TAG, "Initialised from WiFi: " + lat + ", " + lon);
             return;
         }
 
         double[] en = coords.toLocal(lat, lon);
+
+        double[] est = particleFilter.estimate();
+        if (est != null) {
+            double de = en[0] - est[0];
+            double dn = en[1] - est[1];
+            double dist = Math.sqrt(de * de + dn * dn);
+
+            // WiFi is usually noisier than GNSS here, so reject big jumps
+            if (dist > 15.0) {
+                Log.d(TAG, "Rejected WiFi outlier. Dist=" + dist);
+                return;
+            }
+        }
+
         particleFilter.updateWifi(en[0], en[1]);
     }
 
@@ -62,9 +103,24 @@ public class FusionManager {
 
     public synchronized double[] getBestPosition() {
         if (!ready || particleFilter == null || coords == null) return null;
+
         double[] en = particleFilter.estimate();
         if (en == null) return null;
-        return coords.toGlobal(en[0], en[1]);
+
+        double[] latLon = coords.toGlobal(en[0], en[1]);
+
+        if (smoothedLatLon == null) {
+            smoothedLatLon = latLon;
+        } else {
+            smoothedLatLon[0] =
+                    DISPLAY_SMOOTHING_ALPHA * latLon[0] +
+                            (1.0 - DISPLAY_SMOOTHING_ALPHA) * smoothedLatLon[0];
+            smoothedLatLon[1] =
+                    DISPLAY_SMOOTHING_ALPHA * latLon[1] +
+                            (1.0 - DISPLAY_SMOOTHING_ALPHA) * smoothedLatLon[1];
+        }
+
+        return new double[]{smoothedLatLon[0], smoothedLatLon[1]};
     }
 
     public synchronized double[] getBestPositionLocal() {
