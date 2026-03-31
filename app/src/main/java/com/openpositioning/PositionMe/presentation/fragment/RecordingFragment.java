@@ -100,6 +100,7 @@ public class RecordingFragment extends Fragment {
     private static final double WIFI_DISPLAY_MIN_DISTANCE_M = 2.0;
 
     private Float smoothedHeadingDeg = null;
+    private static final float HEADING_SMOOTHING_ALPHA = 0.20f;
     private final Runnable refreshDataTask = new Runnable() {
         @Override
         public void run() {
