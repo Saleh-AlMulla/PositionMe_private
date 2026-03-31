@@ -155,7 +155,7 @@
                 android:textColor="@color/md_theme_onSecondary" />
         </androidx.gridlayout.widget.GridLayout>
 
-        <!-- Grey button for indoor positioning, anchored to the bottom. -->
+        <!-- Grey button for indoor com.openpositioning.PositionMe.positioning, anchored to the bottom. -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/indoorButton"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"

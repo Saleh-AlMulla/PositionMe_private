@@ -134,6 +134,8 @@ public class TrajectoryMapFragment extends Fragment {
     private final List<Marker> wifiObservationMarkers = new ArrayList<>();
     private final List<Marker> pdrObservationMarkers = new ArrayList<>();
 
+    private LatLng lastWifiObservationLocation = null;
+
 
     /**
      * Orange polyline connecting every accepted PDR position (filtered by distance threshold).
@@ -731,6 +733,15 @@ public class TrajectoryMapFragment extends Fragment {
             return;
         }
 
+        if (lastWifiObservationLocation != null) {
+            double dist = UtilFunctions.distanceBetweenPoints(lastWifiObservationLocation, wifiLocation);
+            if (dist < 2.0) {
+                Log.d("DisplayDebug", "updateWifiObservation skipped: too close (" +
+                        String.format("%.2f", dist) + "m < 2.0m)");
+                return;
+            }
+        }
+
         addObservationMarker(
                 wifiLocation,
                 "WiFi",
@@ -738,6 +749,7 @@ public class TrajectoryMapFragment extends Fragment {
                 wifiObservationMarkers,
                 MAX_WIFI_OBSERVATIONS
         );
+        lastWifiObservationLocation = wifiLocation;
     }
 
 
