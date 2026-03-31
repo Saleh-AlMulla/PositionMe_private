@@ -231,7 +231,7 @@ public class RecordingFragment extends Fragment {
         LatLng cur = trajectoryMapFragment.getCurrentLocation();
         if (cur == null) {
             Toast.makeText(requireContext(), "" +
-                    "I haven't gotten my current location yet, let me take a couple of steps/wait for the map to load.",
+                            "I haven't gotten my current location yet, let me take a couple of steps/wait for the map to load.",
                     Toast.LENGTH_SHORT).show();
             return;
         }
@@ -330,6 +330,12 @@ public class RecordingFragment extends Fragment {
                 gnssError.setVisibility(View.GONE);
                 trajectoryMapFragment.clearGNSS();
             }
+        }
+
+        // WiFi observation marker
+        LatLng wifiLocation = sensorFusion.getLatLngWifiPositioning();
+        if (wifiLocation != null && trajectoryMapFragment != null) {
+            trajectoryMapFragment.updateWifiObservation(wifiLocation);
         }
 
         // Update previous
