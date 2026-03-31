@@ -403,14 +403,15 @@ public class PdrProcessing {
      * @return  average step length in meters.
      */
     public float getAverageStepLength(){
-        //Calculate average step length
-        float averageStepLength = sumStepLength/(float) stepCount;
+        if (stepCount <= 0) {
+            return 0f;
+        }
 
-        //Reset sum and number of steps
+        float averageStepLength = sumStepLength / (float) stepCount;
+
         stepCount = 0;
         sumStepLength = 0;
 
-        //Return average step length
         return averageStepLength;
     }
 
