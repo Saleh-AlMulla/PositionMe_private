@@ -106,8 +106,8 @@ public class MapMatchingEngine {
 
     /**
      * Noise (metres) injected into particles after resampling to maintain
-     * diversity. Small value (0.2m) prevents particles teleporting through
-     * thin wall segments while still avoiding filter collapse.
+     * diversity. Wall-checked before applying to prevent particles teleporting
+     * through thin wall segments.
      */
     private static final double RESAMPLE_JITTER = 0.2;
 
@@ -118,26 +118,24 @@ public class MapMatchingEngine {
     private static final double LIFT_HORIZONTAL_THRESHOLD = 1.5;
 
     /**
-     * EMA smoothing factor for the output position displayed on screen.
-     * Range 0-1: lower = smoother but more lag, higher = more responsive.
-     * Large position jumps (WiFi corrections > 8m) bypass smoothing to snap
-     * immediately to the corrected position.
+     * EMA smoothing factor for the output position.
+     * 0.25 balances responsiveness with smoothness — higher than 0.15 so the
+     * marker visibly follows movement, lower than 0.3 to reduce step jitter.
      */
-    private static final double POSITION_SMOOTH_ALPHA = 0.3;
+    private static final double POSITION_SMOOTH_ALPHA = 0.25;
 
     /**
-     * Distance (metres) beyond which a position change is treated as a
-     * deliberate WiFi/GNSS correction and bypasses EMA smoothing.
+     * Distance (metres) beyond which a position change bypasses EMA smoothing.
+     * Only used for genuine large corrections, not lost-filter reinitialisation
+     * (which resets smoothedOutputX/Y directly to avoid trace smearing).
      */
-    private static final double POSITION_SMOOTH_SNAP_THRESHOLD = 8.0;
+    private static final double POSITION_SMOOTH_SNAP_THRESHOLD = 20.0;
 
     /**
      * Distance threshold (metres) between weighted mean and best-weight particle.
-     * If exceeded, the best particle is used as the position estimate instead of
-     * the mean, preventing the output from landing inside a wall when the particle
-     * cloud is split across a wall boundary.
+     * If exceeded, best particle position is used (mean likely inside a wall).
      */
-    private static final double WALL_MEAN_FALLBACK_THRESHOLD = 3.0;
+    private static final double WALL_MEAN_FALLBACK_THRESHOLD = 5.0;
 
     // -------------------------------------------------------------------------
     // Coordinate conversion — metres per degree at Edinburgh (~55.92 N)
@@ -358,8 +356,6 @@ public class MapMatchingEngine {
 
             wallCheckCount++;
             if (doesCrossWall(oldX, oldY, newX, newY, p.getFloor())) {
-                // Penalise wall-crossing particles and leave them in place.
-                // The harsh penalty ensures they are eliminated at next resample.
                 p.setWeight(p.getWeight() * WALL_PENALTY);
                 wallHitCount++;
             } else {
@@ -368,7 +364,7 @@ public class MapMatchingEngine {
             }
         }
 
-        // TODO: remove before submission — fires once per step (200 checks/step)
+        // TODO: remove before submission
         if (wallCheckCount > 0 && wallCheckCount % 200 == 0) {
             Log.d(TAG, "Wall check #" + (wallCheckCount / 200)
                     + " — hits=" + wallHitCount + "/" + wallCheckCount
@@ -397,6 +393,12 @@ public class MapMatchingEngine {
     /**
      * Updates particle weights based on a WiFi position observation.
      *
+     * <p>Also handles lost-filter recovery: if the weighted mean has drifted
+     * more than 15m from the WiFi fix, the filter has diverged — particles are
+     * reinitialised around the WiFi fix. The EMA smoothed output is reset to the
+     * new position immediately to prevent trace smearing between old and new
+     * positions while the EMA catches up.</p>
+     *
      * @param lat       WiFi-estimated latitude
      * @param lng       WiFi-estimated longitude
      * @param wifiFloor WiFi-estimated floor number
@@ -413,13 +415,44 @@ public class MapMatchingEngine {
             double dist = Math.sqrt(Math.pow(p.getX() - obsX, 2)
                     + Math.pow(p.getY() - obsY, 2));
             double likelihood = gaussianLikelihood(dist, sigma);
-            // Reduced floor mismatch penalty (0.4 not 0.1) so WiFi corrections
-            // still pull particles even when the floor estimate is temporarily wrong.
             if (p.getFloor() != wifiFloor) likelihood *= 0.4;
             p.setWeight(p.getWeight() * likelihood);
         }
 
         normaliseWeights();
+
+        // ── Lost-filter recovery ──────────────────────────────────────────────
+        double weightedX = 0, weightedY = 0;
+        for (Particle p : particles) {
+            weightedX += p.getX() * p.getWeight();
+            weightedY += p.getY() * p.getWeight();
+        }
+        double meanDistFromWifi = Math.sqrt(
+                Math.pow(weightedX - obsX, 2) + Math.pow(weightedY - obsY, 2));
+
+        if (meanDistFromWifi > 8.0) {
+            Log.w(TAG, "Lost filter detected — reinitialising around WiFi fix"
+                    + " dist=" + String.format("%.1f", meanDistFromWifi) + "m");
+            particles.clear();
+            for (int i = 0; i < NUM_PARTICLES; i++) {
+                double px = obsX + random.nextGaussian() * WIFI_SIGMA;
+                double py = obsY + random.nextGaussian() * WIFI_SIGMA;
+                particles.add(new Particle(px, py, wifiFloor, 1.0 / NUM_PARTICLES));
+            }
+            // Reset EMA to particle weighted mean after reinit, not raw WiFi fix,
+            // keeping displayed position closer to the building interior.
+            normaliseWeights();
+            double reinitMeanX = 0, reinitMeanY = 0;
+            for (Particle p : particles) {
+                reinitMeanX += p.getX() * p.getWeight();
+                reinitMeanY += p.getY() * p.getWeight();
+            }
+            smoothedOutputX = reinitMeanX;
+            smoothedOutputY = reinitMeanY;
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         if (effectiveSampleSize() < RESAMPLE_THRESHOLD * NUM_PARTICLES) {
             resample();
         }
@@ -454,8 +487,6 @@ public class MapMatchingEngine {
         }
 
         normaliseWeights();
-        // Trigger resample on GNSS updates as well as WiFi — keeps particle
-        // population healthy after sharp corrections.
         if (effectiveSampleSize() < RESAMPLE_THRESHOLD * NUM_PARTICLES) {
             resample();
         }
@@ -468,39 +499,28 @@ public class MapMatchingEngine {
     /**
      * Checks if the barometric elevation change warrants a floor transition.
      *
-     * <p>Four guards prevent false transitions from barometric noise:</p>
+     * <p>Four guards prevent false transitions:</p>
      * <ol>
-     *   <li><b>Warmup</b>: for {@link #FLOOR_TRANSITION_WARMUP_MS} ms after init,
-     *       the elevation baseline continuously tracks the barometer absorbing startup
-     *       drift. No transitions can fire during this period.</li>
-     *   <li><b>Full-floor threshold</b>: delta must exceed
-     *       {@link #FLOOR_CHANGE_ELEVATION_THRESHOLD} (one floor height).</li>
-     *   <li><b>Sustained elevation</b>: threshold must hold for
-     *       {@link #ELEVATION_SUSTAIN_STEPS} consecutive steps.</li>
-     *   <li><b>Minimum gap</b>: at least {@link #MIN_STEPS_BETWEEN_FLOOR_CHANGES}
-     *       steps since the last floor change.</li>
+     *   <li>Warmup: baseline tracks barometer for 30s absorbing startup drift.</li>
+     *   <li>Full-floor threshold: delta must exceed one floor height (4.0m).</li>
+     *   <li>Sustained elevation: must hold for 5 consecutive steps.</li>
+     *   <li>Minimum gap: at least 10 steps since last floor change.</li>
      * </ol>
-     *
-     * <p>Stairs vs lift is classified by accumulated horizontal distance during
-     * the elevation change episode. Lifts show negligible horizontal movement.</p>
      */
     private void checkFloorTransition() {
         if (floorShapes == null || floorHeight <= 0) return;
 
-        // Guard 1: warmup — absorb barometric startup drift before allowing transitions
         if (System.currentTimeMillis() - initialiseTimeMs < FLOOR_TRANSITION_WARMUP_MS) {
             elevationAtLastFloorChange = currentElevation;
             stepsAboveElevationThreshold = 0;
             return;
         }
 
-        // Guard 2: minimum steps between floor changes
         if (stepsSinceLastFloorChange < MIN_STEPS_BETWEEN_FLOOR_CHANGES) return;
 
         float elevationDeltaFromBaseline = currentElevation - elevationAtLastFloorChange;
         float elevationChangeMagnitude = Math.abs(elevationDeltaFromBaseline);
 
-        // Track horizontal movement during elevation change episodes
         if (elevationChangeMagnitude > 1.0f) {
             if (!inElevationChange) {
                 inElevationChange = true;
@@ -513,13 +533,11 @@ public class MapMatchingEngine {
             stepsAboveElevationThreshold = 0;
         }
 
-        // Guard 3: full-floor threshold
         if (elevationChangeMagnitude < FLOOR_CHANGE_ELEVATION_THRESHOLD) {
             stepsAboveElevationThreshold = 0;
             return;
         }
 
-        // Guard 4: sustained elevation over multiple steps
         stepsAboveElevationThreshold++;
         if (stepsAboveElevationThreshold < ELEVATION_SUSTAIN_STEPS) return;
 
@@ -531,16 +549,12 @@ public class MapMatchingEngine {
 
         for (Particle p : particles) {
             boolean nearTransition = isNearStairsOrLift(p.getX(), p.getY(), p.getFloor());
-            // Always move floor — barometer overrides per assignment spec §3.2.
-            // Penalise particles not near any transition feature.
             p.setFloor(targetFloor);
             if (nearTransition) {
                 if (!isLift) {
-                    // Stairs: small horizontal spread to account for staircase exit position
                     p.setX(p.getX() + random.nextGaussian() * 1.0);
                     p.setY(p.getY() + random.nextGaussian() * 1.0);
                 }
-                // Lift: keep X/Y — shaft is vertical, no horizontal displacement
                 p.setWeight(p.getWeight() * 1.2);
             } else {
                 p.setWeight(p.getWeight() * 0.3);
@@ -562,9 +576,7 @@ public class MapMatchingEngine {
         this.stepsSinceLastFloorChange = 0;
     }
 
-    /**
-     * Checks if a position is near stairs or lift features on the given floor.
-     */
+    /** Checks if a position is near stairs or lift features on the given floor. */
     private boolean isNearStairsOrLift(double x, double y, int floor) {
         if (floorShapes == null || floor < 0 || floor >= floorShapes.size()) return false;
 
@@ -622,8 +634,6 @@ public class MapMatchingEngine {
                     }
                 }
 
-                // Check closing edge for polygon rings, guarding against zero-length
-                // segments (standard GeoJSON closed rings repeat first point as last)
                 if (size >= 3) {
                     String geoType = feature.getGeometryType();
                     if ("MultiPolygon".equals(geoType) || "Polygon".equals(geoType)) {
@@ -647,10 +657,6 @@ public class MapMatchingEngine {
         return false;
     }
 
-    /**
-     * Tests if two line segments (p1 to p2) and (p3 to p4) intersect using the
-     * cross-product orientation method.
-     */
     private static boolean segmentsIntersect(double p1x, double p1y, double p2x, double p2y,
                                              double p3x, double p3y, double p4x, double p4y) {
         double d1 = crossProduct(p3x, p3y, p4x, p4y, p1x, p1y);
@@ -671,13 +677,11 @@ public class MapMatchingEngine {
         return false;
     }
 
-    /** Cross product of vectors (b-a) x (c-a). */
     private static double crossProduct(double ax, double ay, double bx, double by,
                                        double cx, double cy) {
         return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
     }
 
-    /** Checks if point (px,py) lies on segment (ax,ay) to (bx,by), assuming collinearity. */
     private static boolean onSegment(double ax, double ay, double bx, double by,
                                      double px, double py) {
         return Math.min(ax, bx) <= px && px <= Math.max(ax, bx)
@@ -688,10 +692,6 @@ public class MapMatchingEngine {
     // Resampling
     // =========================================================================
 
-    /**
-     * Calculates the effective sample size (ESS) of the particle population.
-     * ESS = 1 / sum(wi squared). Low ESS indicates weight degeneracy.
-     */
     private double effectiveSampleSize() {
         double sumSq = 0;
         for (Particle p : particles) sumSq += p.getWeight() * p.getWeight();
@@ -699,13 +699,7 @@ public class MapMatchingEngine {
     }
 
     /**
-     * Systematic resampling: selects particles proportional to their weights,
-     * replaces the population with copies reset to uniform weight, then injects
-     * small wall-aware Gaussian jitter to maintain diversity.
-     *
-     * <p>Jitter is wall-checked before being applied — if the jitter displacement
-     * would cross a wall segment it is discarded, preventing particles from being
-     * teleported through thin walls during resampling.</p>
+     * Systematic resampling with wall-aware jitter.
      */
     private void resample() {
         int n = particles.size();
@@ -730,9 +724,6 @@ public class MapMatchingEngine {
             newParticles.add(copy);
         }
 
-        // Inject diversity jitter only if it does not cross a wall.
-        // This prevents particles from teleporting through thin wall segments
-        // while still maintaining population diversity.
         for (Particle p : newParticles) {
             double jx = p.getX() + random.nextGaussian() * RESAMPLE_JITTER;
             double jy = p.getY() + random.nextGaussian() * RESAMPLE_JITTER;
@@ -746,10 +737,6 @@ public class MapMatchingEngine {
         particles.addAll(newParticles);
     }
 
-    /**
-     * Normalises all particle weights to sum to 1.
-     * Resets to uniform if weights have collapsed entirely.
-     */
     private void normaliseWeights() {
         double sum = 0;
         for (Particle p : particles) sum += p.getWeight();
@@ -767,29 +754,19 @@ public class MapMatchingEngine {
     // =========================================================================
 
     /**
-     * Returns the best-estimate position as a LatLng, with two improvements
-     * over a naive weighted mean:
+     * Returns the best-estimate position as a LatLng.
      *
-     * <ol>
-     *   <li><b>Wall-aware fallback</b>: if the weighted mean is more than
-     *       {@link #WALL_MEAN_FALLBACK_THRESHOLD} metres from the highest-weight
-     *       particle, the particle cloud has likely split across a wall boundary.
-     *       In this case the highest-weight particle position is used instead of
-     *       the mean, keeping the output on the correct side of the wall.</li>
-     *   <li><b>EMA smoothing</b>: an exponential moving average
-     *       (alpha = {@link #POSITION_SMOOTH_ALPHA}) is applied to the output
-     *       coordinates before returning, reducing jitter from step-to-step PDR
-     *       noise. Large position changes (WiFi/GNSS corrections greater than
-     *       {@link #POSITION_SMOOTH_SNAP_THRESHOLD}) bypass smoothing and snap
-     *       immediately to the corrected position.</li>
-     * </ol>
+     * <p>Uses weighted mean with wall-aware fallback (if mean is more than
+     * {@link #WALL_MEAN_FALLBACK_THRESHOLD} metres from the best particle, uses
+     * best particle instead). EMA smoothing with alpha={@link #POSITION_SMOOTH_ALPHA}
+     * is applied, with snap for corrections larger than
+     * {@link #POSITION_SMOOTH_SNAP_THRESHOLD}.</p>
      *
-     * @return smoothed best-estimate position, or null if not initialised
+     * @return smoothed wall-constrained position, or null if not initialised
      */
     public LatLng getEstimatedPosition() {
         if (!isActive() || particles.isEmpty()) return null;
 
-        // Compute weighted mean and find highest-weight particle simultaneously
         double weightedX = 0, weightedY = 0;
         Particle bestParticle = null;
         double bestWeight = -1;
@@ -803,8 +780,6 @@ public class MapMatchingEngine {
             }
         }
 
-        // Wall-aware fallback: if the mean is far from the best particle the cloud
-        // has split across a wall — use the best particle instead
         double rawX = weightedX;
         double rawY = weightedY;
         if (bestParticle != null) {
@@ -816,7 +791,6 @@ public class MapMatchingEngine {
             }
         }
 
-        // EMA smoothing — snap on large corrections, smooth small movements
         if (Double.isNaN(smoothedOutputX)) {
             smoothedOutputX = rawX;
             smoothedOutputY = rawY;
@@ -825,7 +799,6 @@ public class MapMatchingEngine {
                     Math.pow(rawX - smoothedOutputX, 2) +
                             Math.pow(rawY - smoothedOutputY, 2));
             if (jumpDist > POSITION_SMOOTH_SNAP_THRESHOLD) {
-                // Large jump (WiFi/GNSS correction) — snap immediately
                 smoothedOutputX = rawX;
                 smoothedOutputY = rawY;
             } else {
@@ -897,7 +870,7 @@ public class MapMatchingEngine {
     // Utility
     // =========================================================================
 
-    /** Gaussian likelihood: exp(-d squared / (2 * sigma squared)). */
+    /** Gaussian likelihood: exp(-d² / (2σ²)). */
     private static double gaussianLikelihood(double distance, double sigma) {
         return Math.exp(-(distance * distance) / (2.0 * sigma * sigma));
     }

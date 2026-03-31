@@ -44,20 +44,23 @@ import com.openpositioning.PositionMe.positioning.FusionManager;
  * <p>
  * The RecordingFragment serves as the interface for users to initiate, monitor, and
  * complete trajectory recording. It integrates sensor fusion data to track user movement
- * and updates a map view in real time. Additionally, it provides UI controls to cancel,
- * stop, and monitor recording progress.
+ * and updates a map view in real time.
  * <p>
- * Features:
- * - Starts and stops trajectory recording.
- * - Displays real-time sensor data such as elevation and distance traveled.
- * - Provides UI controls to cancel or complete recording.
- * - Uses {@link TrajectoryMapFragment} to visualize recorded paths.
- * - Manages GNSS tracking and error display.
+ * Position display strategy:
+ * <ol>
+ *   <li>Primary: MapMatchingEngine — wall-constrained particle filter with floor detection.
+ *       EMA-smoothed output with lost-filter recovery that resets the EMA on reinitialisation
+ *       to prevent trace smearing outside the building.</li>
+ *   <li>Fallback: FusionManager — smooth GPS+WiFi+PDR Kalman filter, used when
+ *       MapMatchingEngine has not yet been initialised.</li>
+ *   <li>Last resort: raw PDR position.</li>
+ * </ol>
+ * The orange trace (marker + polyline) always reflects one consistent source per cycle.
+ * The red trace shows raw step-counting only, allowing visual comparison.
  *
  * @see TrajectoryMapFragment The map fragment displaying the recorded trajectory.
  * @see RecordingActivity The activity managing the recording workflow.
  * @see SensorFusion Handles sensor data collection.
- * @see SensorTypes Enumeration of available sensor types.
  */
 public class RecordingFragment extends Fragment {
 
@@ -101,6 +104,7 @@ public class RecordingFragment extends Fragment {
 
     private Float smoothedHeadingDeg = null;
     private static final float HEADING_SMOOTHING_ALPHA = 0.20f;
+
     private final Runnable refreshDataTask = new Runnable() {
         @Override
         public void run() {
@@ -231,7 +235,21 @@ public class RecordingFragment extends Fragment {
     }
 
     /**
-     * Update the UI with sensor data and pass map updates to TrajectoryMapFragment.
+     * Updates the UI with sensor data and passes map updates to TrajectoryMapFragment.
+     *
+     * <p>Position source priority each cycle (~200ms):</p>
+     * <ol>
+     *   <li>MapMatchingEngine: wall-constrained particle filter — primary source.
+     *       EMA-smoothed, resets cleanly on lost-filter recovery.</li>
+     *   <li>FusionManager: Kalman-filtered GPS+WiFi+PDR — fallback before
+     *       MapMatchingEngine initialises.</li>
+     *   <li>Raw PDR: fallback of last resort.</li>
+     * </ol>
+     *
+     * <p>The same {@code fusedLocation} variable is used for both
+     * {@link TrajectoryMapFragment#updateUserLocation} (marker) and
+     * {@link TrajectoryMapFragment#updatePdrObservation} (observation dot),
+     * ensuring marker and polyline are always in sync.</p>
      */
     private void updateUIandPosition() {
         float[] pdrValues = sensorFusion.getSensorValueMap().get(SensorTypes.PDR);
@@ -248,34 +266,45 @@ public class RecordingFragment extends Fragment {
         float elevationVal = sensorFusion.getElevation();
         elevation.setText(getString(R.string.elevation, String.format("%.1f", elevationVal)));
 
-        // Compute raw PDR position independently for the red trace
-        float[] latLngArray = sensorFusion.getGNSSLatitude(true);
-        if (latLngArray != null) {
-            if (rawPdrPosition == null) {
-                rawPdrPosition = new LatLng(latLngArray[0], latLngArray[1]);
+        com.openpositioning.PositionMe.mapmatching.MapMatchingEngine mmEngine =
+                sensorFusion.getMapMatchingEngine();
+
+        // ── Wait for MapMatchingEngine before drawing anything ────────────────
+        // This ensures both traces start at the manually dragged position,
+        // not the GPS auto-fix. Before the engine is active, we still track
+        // PDR accumulation so the first step delta is correct when we do start.
+        if (mmEngine == null || !mmEngine.isActive()) {
+            previousPosX = pdrValues[0];
+            previousPosY = pdrValues[1];
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Initialise raw PDR position from engine's start (manually dragged point).
+        // Only done once — first time engine is active.
+        if (rawPdrPosition == null) {
+            LatLng mmStart = mmEngine.getEstimatedPosition();
+            if (mmStart != null) {
+                rawPdrPosition = mmStart;
             }
+        }
+
+        // Advance raw PDR by step delta
+        if (rawPdrPosition != null) {
             rawPdrPosition = UtilFunctions.calculateNewPos(
                     rawPdrPosition,
                     new float[]{ pdrValues[0] - previousPosX, pdrValues[1] - previousPosY }
             );
         }
 
-        // Draw raw PDR on the red polyline
+        // Red polyline — raw step-counting only, no corrections
         if (rawPdrPosition != null && trajectoryMapFragment != null) {
             trajectoryMapFragment.addRawPdrPoint(rawPdrPosition);
         }
 
-        // Best position: prefer MapMatchingEngine (wall-aware) > FusionManager > raw PDR
-        LatLng fusedLocation = null;
-        String positionSource = "none";
-
-        com.openpositioning.PositionMe.mapmatching.MapMatchingEngine mmEngine =
-                sensorFusion.getMapMatchingEngine();
-
-        if (mmEngine != null && mmEngine.isActive()) {
-            fusedLocation = mmEngine.getEstimatedPosition();
-            positionSource = "MapMatchingEngine";
-        }
+        // ── Position source selection ──────────────────────────────────────────
+        LatLng fusedLocation = mmEngine.getEstimatedPosition();
+        String positionSource = "MapMatchingEngine";
 
         if (fusedLocation == null) {
             double[] fusedPos = FusionManager.getInstance().getBestPosition();
@@ -284,22 +313,19 @@ public class RecordingFragment extends Fragment {
                 positionSource = "FusionManager";
             }
         }
+        // ─────────────────────────────────────────────────────────────────────
 
-        // TODO: remove before submission — log position source every 5 UI updates (~1s)
+        // TODO: remove before submission
         if (uiUpdateCount % 5 == 0) {
-            if (mmEngine == null) {
-                Log.d(TAG, "Position source=" + positionSource
-                        + " | mmEngine=NULL");
-            } else {
-                Log.d(TAG, "Position source=" + positionSource
-                        + " | mmEngine.isActive=" + mmEngine.isActive()
-                        + " | fusedLoc=" + (fusedLocation == null ? "null"
-                        : String.format("(%.5f, %.5f)",
-                        fusedLocation.latitude, fusedLocation.longitude)));
-            }
+            Log.d(TAG, "Position source=" + positionSource
+                    + " | mmEngine.isActive=" + mmEngine.isActive()
+                    + " | fusedLoc=" + (fusedLocation == null ? "null"
+                    : String.format("(%.5f, %.5f)",
+                    fusedLocation.latitude, fusedLocation.longitude)));
         }
 
-        float headingDeg = smoothHeadingDeg((float) Math.toDegrees(sensorFusion.passOrientation()));
+        float headingDeg = smoothHeadingDeg(
+                (float) Math.toDegrees(sensorFusion.passOrientation()));
 
         if (fusedLocation != null && trajectoryMapFragment != null) {
             trajectoryMapFragment.updateUserLocation(fusedLocation, headingDeg);
@@ -311,24 +337,23 @@ public class RecordingFragment extends Fragment {
 
         long now = System.currentTimeMillis();
 
-        // GNSS logic: only draw when a genuinely new GNSS observation arrives
+        // GNSS markers
         float[] gnss = sensorFusion.getSensorValueMap().get(SensorTypes.GNSSLATLONG);
         if (gnss != null && trajectoryMapFragment != null) {
             if (trajectoryMapFragment.isGnssEnabled()) {
                 LatLng gnssLocation = new LatLng(gnss[0], gnss[1]);
                 LatLng currentLoc = trajectoryMapFragment.getCurrentLocation();
                 if (currentLoc != null) {
-                    double errorDist = UtilFunctions.distanceBetweenPoints(currentLoc, gnssLocation);
+                    double errorDist = UtilFunctions.distanceBetweenPoints(
+                            currentLoc, gnssLocation);
                     gnssError.setVisibility(View.VISIBLE);
-                    gnssError.setText(String.format(getString(R.string.gnss_error) + "%.2fm", errorDist));
+                    gnssError.setText(String.format(
+                            getString(R.string.gnss_error) + "%.2fm", errorDist));
                 }
-
                 if (shouldDisplayObservation(
-                        gnssLocation,
-                        lastDisplayedGnssObservation,
+                        gnssLocation, lastDisplayedGnssObservation,
                         now - lastDisplayedGnssTimeMs,
-                        GNSS_DISPLAY_MIN_INTERVAL_MS,
-                        GNSS_DISPLAY_MIN_DISTANCE_M)) {
+                        GNSS_DISPLAY_MIN_INTERVAL_MS, GNSS_DISPLAY_MIN_DISTANCE_M)) {
                     trajectoryMapFragment.updateGNSS(gnssLocation);
                     lastDisplayedGnssObservation = gnssLocation;
                     lastDisplayedGnssTimeMs = now;
@@ -339,15 +364,13 @@ public class RecordingFragment extends Fragment {
             }
         }
 
-        // WiFi logic: draw green observation markers only when a new accepted WiFi fix appears
+        // WiFi markers
         if (trajectoryMapFragment != null) {
             LatLng wifiLocation = sensorFusion.getLatLngWifiPositioning();
             if (wifiLocation != null && shouldDisplayObservation(
-                    wifiLocation,
-                    lastDisplayedWifiObservation,
+                    wifiLocation, lastDisplayedWifiObservation,
                     now - lastDisplayedWifiTimeMs,
-                    WIFI_DISPLAY_MIN_INTERVAL_MS,
-                    WIFI_DISPLAY_MIN_DISTANCE_M)) {
+                    WIFI_DISPLAY_MIN_INTERVAL_MS, WIFI_DISPLAY_MIN_DISTANCE_M)) {
                 trajectoryMapFragment.updateWifiObservation(wifiLocation);
                 lastDisplayedWifiObservation = wifiLocation;
                 lastDisplayedWifiTimeMs = now;
@@ -358,10 +381,8 @@ public class RecordingFragment extends Fragment {
         previousPosY = pdrValues[1];
     }
 
-    private boolean shouldDisplayObservation(LatLng candidate,
-                                             LatLng previous,
-                                             long ageMs,
-                                             long minIntervalMs,
+    private boolean shouldDisplayObservation(LatLng candidate, LatLng previous,
+                                             long ageMs, long minIntervalMs,
                                              double minDistanceMeters) {
         if (candidate == null) return false;
         if (previous == null) return true;
@@ -373,23 +394,17 @@ public class RecordingFragment extends Fragment {
         if (Float.isNaN(newHeadingDeg) || Float.isInfinite(newHeadingDeg)) {
             return smoothedHeadingDeg != null ? smoothedHeadingDeg : 0f;
         }
-
         if (smoothedHeadingDeg == null) {
             smoothedHeadingDeg = newHeadingDeg;
             return newHeadingDeg;
         }
-
         float delta = newHeadingDeg - smoothedHeadingDeg;
         while (delta > 180f) delta -= 360f;
         while (delta < -180f) delta += 360f;
-
         smoothedHeadingDeg = smoothedHeadingDeg + HEADING_SMOOTHING_ALPHA * delta;
         return smoothedHeadingDeg;
     }
 
-    /**
-     * Start the blinking effect for the recording icon.
-     */
     private void blinkingRecordingIcon() {
         Animation blinking = new AlphaAnimation(1, 0);
         blinking.setDuration(800);
