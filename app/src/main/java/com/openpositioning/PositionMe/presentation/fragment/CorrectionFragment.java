@@ -108,21 +108,35 @@ public class CorrectionFragment extends Fragment {
         this.pathView = view.findViewById(R.id.pathView1);
 
         averageStepLength = sensorFusion.passAverageStepLength();
-        averageStepLengthText.setText(getString(R.string.averageStepLgn) + ": "
-                + String.format("%.2f", averageStepLength));
+        if (Float.isNaN(averageStepLength) || averageStepLength <= 0.05f) {
+            averageStepLengthText.setText(getString(R.string.averageStepLgn) + ": --");
+        } else {
+            averageStepLengthText.setText(getString(R.string.averageStepLgn) + ": "
+                    + String.format("%.2f", averageStepLength));
+        }
 
         // Listen for ENTER key
         this.stepLengthInput.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_ENTER) {
-                newStepLength = Float.parseFloat(changedText.toString());
-                // Rescale path
-                sensorFusion.redrawPath(newStepLength / averageStepLength);
+                String text = changedText == null ? "" : changedText.toString().trim();
+                if (text.isEmpty()) return false;
+
+                try {
+                    newStepLength = Float.parseFloat(text);
+                } catch (NumberFormatException e) {
+                    return false;
+                }
+
+                if (!Float.isNaN(averageStepLength) && averageStepLength > 0.05f) {
+                    sensorFusion.redrawPath(newStepLength / averageStepLength);
+                    pathView.invalidate();
+                }
+
                 averageStepLengthText.setText(getString(R.string.averageStepLgn)
                         + ": " + String.format("%.2f", newStepLength));
-                pathView.invalidate();
 
                 secondPass++;
-                if (secondPass == 2) {
+                if (secondPass == 2 || Float.isNaN(averageStepLength) || averageStepLength <= 0.05f) {
                     averageStepLength = newStepLength;
                     secondPass = 0;
                 }

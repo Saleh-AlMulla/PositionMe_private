@@ -87,10 +87,19 @@ public class RecordingFragment extends Fragment {
 
     // References to the child map fragment
     private TrajectoryMapFragment trajectoryMapFragment;
-
-    // TODO: remove before submission
     private int uiUpdateCount = 0;
 
+    private LatLng lastDisplayedGnssObservation = null;
+    private long lastDisplayedGnssTimeMs = 0L;
+    private static final long GNSS_DISPLAY_MIN_INTERVAL_MS = 1500L;
+    private static final double GNSS_DISPLAY_MIN_DISTANCE_M = 3.0;
+
+    private LatLng lastDisplayedWifiObservation = null;
+    private long lastDisplayedWifiTimeMs = 0L;
+    private static final long WIFI_DISPLAY_MIN_INTERVAL_MS = 1500L;
+    private static final double WIFI_DISPLAY_MIN_DISTANCE_M = 2.0;
+
+    private Float smoothedHeadingDeg = null;
     private final Runnable refreshDataTask = new Runnable() {
         @Override
         public void run() {
@@ -259,7 +268,6 @@ public class RecordingFragment extends Fragment {
         LatLng fusedLocation = null;
         String positionSource = "none";
 
-        // First choice: map-matched position (has wall constraints)
         com.openpositioning.PositionMe.mapmatching.MapMatchingEngine mmEngine =
                 sensorFusion.getMapMatchingEngine();
 
@@ -268,7 +276,6 @@ public class RecordingFragment extends Fragment {
             positionSource = "MapMatchingEngine";
         }
 
-        // Second choice: FusionManager (WiFi/GNSS corrections, no walls)
         if (fusedLocation == null) {
             double[] fusedPos = FusionManager.getInstance().getBestPosition();
             if (fusedPos != null) {
@@ -291,19 +298,19 @@ public class RecordingFragment extends Fragment {
             }
         }
 
-        // Display the best available position
+        float headingDeg = smoothHeadingDeg((float) Math.toDegrees(sensorFusion.passOrientation()));
+
         if (fusedLocation != null && trajectoryMapFragment != null) {
-            trajectoryMapFragment.updateUserLocation(fusedLocation,
-                    (float) Math.toDegrees(sensorFusion.passOrientation()));
+            trajectoryMapFragment.updateUserLocation(fusedLocation, headingDeg);
             trajectoryMapFragment.updatePdrObservation(fusedLocation);
         } else if (rawPdrPosition != null && trajectoryMapFragment != null) {
-            // Fallback: raw PDR before any fusion is ready
-            trajectoryMapFragment.updateUserLocation(rawPdrPosition,
-                    (float) Math.toDegrees(sensorFusion.passOrientation()));
+            trajectoryMapFragment.updateUserLocation(rawPdrPosition, headingDeg);
             trajectoryMapFragment.updatePdrObservation(rawPdrPosition);
         }
 
-        // GNSS logic
+        long now = System.currentTimeMillis();
+
+        // GNSS logic: only draw when a genuinely new GNSS observation arrives
         float[] gnss = sensorFusion.getSensorValueMap().get(SensorTypes.GNSSLATLONG);
         if (gnss != null && trajectoryMapFragment != null) {
             if (trajectoryMapFragment.isGnssEnabled()) {
@@ -314,16 +321,69 @@ public class RecordingFragment extends Fragment {
                     gnssError.setVisibility(View.VISIBLE);
                     gnssError.setText(String.format(getString(R.string.gnss_error) + "%.2fm", errorDist));
                 }
-                trajectoryMapFragment.updateGNSS(gnssLocation);
+
+                if (shouldDisplayObservation(
+                        gnssLocation,
+                        lastDisplayedGnssObservation,
+                        now - lastDisplayedGnssTimeMs,
+                        GNSS_DISPLAY_MIN_INTERVAL_MS,
+                        GNSS_DISPLAY_MIN_DISTANCE_M)) {
+                    trajectoryMapFragment.updateGNSS(gnssLocation);
+                    lastDisplayedGnssObservation = gnssLocation;
+                    lastDisplayedGnssTimeMs = now;
+                }
             } else {
                 gnssError.setVisibility(View.GONE);
                 trajectoryMapFragment.clearGNSS();
             }
         }
 
-        // Update previous
+        // WiFi logic: draw green observation markers only when a new accepted WiFi fix appears
+        if (trajectoryMapFragment != null) {
+            LatLng wifiLocation = sensorFusion.getLatLngWifiPositioning();
+            if (wifiLocation != null && shouldDisplayObservation(
+                    wifiLocation,
+                    lastDisplayedWifiObservation,
+                    now - lastDisplayedWifiTimeMs,
+                    WIFI_DISPLAY_MIN_INTERVAL_MS,
+                    WIFI_DISPLAY_MIN_DISTANCE_M)) {
+                trajectoryMapFragment.updateWifiObservation(wifiLocation);
+                lastDisplayedWifiObservation = wifiLocation;
+                lastDisplayedWifiTimeMs = now;
+            }
+        }
+
         previousPosX = pdrValues[0];
         previousPosY = pdrValues[1];
+    }
+
+    private boolean shouldDisplayObservation(LatLng candidate,
+                                             LatLng previous,
+                                             long ageMs,
+                                             long minIntervalMs,
+                                             double minDistanceMeters) {
+        if (candidate == null) return false;
+        if (previous == null) return true;
+        if (ageMs < minIntervalMs) return false;
+        return UtilFunctions.distanceBetweenPoints(previous, candidate) >= minDistanceMeters;
+    }
+
+    private float smoothHeadingDeg(float newHeadingDeg) {
+        if (Float.isNaN(newHeadingDeg) || Float.isInfinite(newHeadingDeg)) {
+            return smoothedHeadingDeg != null ? smoothedHeadingDeg : 0f;
+        }
+
+        if (smoothedHeadingDeg == null) {
+            smoothedHeadingDeg = newHeadingDeg;
+            return newHeadingDeg;
+        }
+
+        float delta = newHeadingDeg - smoothedHeadingDeg;
+        while (delta > 180f) delta -= 360f;
+        while (delta < -180f) delta += 360f;
+
+        smoothedHeadingDeg = smoothedHeadingDeg + HEADING_SMOOTHING_ALPHA * delta;
+        return smoothedHeadingDeg;
     }
 
     /**
