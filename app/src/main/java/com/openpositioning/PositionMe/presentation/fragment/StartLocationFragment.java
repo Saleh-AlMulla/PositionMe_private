@@ -485,6 +485,17 @@ public class StartLocationFragment extends Fragment {
                                 startFloor, floorHeight,
                                 building.getFloorShapesList()
                         );
+
+                        // Pass building outline for boundary checking
+                        List<LatLng> outline = building.getOutlinePolygon();
+                        if (outline != null) {
+                            sensorFusion.getMapMatchingEngine().setBuildingOutline(
+                                    outline,
+                                    startPosition[0],
+                                    startPosition[1]
+                            );
+                        }
+
                         sensorFusion.getMapMatchingEngine().logWallStats();
                         Log.d(TAG, "Map matching initialised for " + selectedBuildingId);
                     }
