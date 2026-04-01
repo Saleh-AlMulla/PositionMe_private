@@ -65,6 +65,10 @@ public class TrajectoryMapFragment extends Fragment {
     private final List<Marker> testPointMarkers = new ArrayList<>();
 
     private Polyline polyline; // Polyline representing user's movement path
+
+    // Rolling 4-point buffers for Catmull-Rom spline — one per polyline
+    private final List<LatLng> rawPdrControlPoints = new ArrayList<>();
+    private final List<LatLng> fusedPdrControlPoints = new ArrayList<>();
     private boolean isRed = true; // Tracks whether the polyline color is red
     private boolean isGnssOn = false; // Tracks if GNSS tracking is enabled
 
@@ -687,10 +691,54 @@ public class TrajectoryMapFragment extends Fragment {
         // Extend the orange trajectory polyline with this accepted position.
         // This builds the continuous walking path shown on the map.
         if (pdrTrajectoryPolyline != null) {
-            List<LatLng> points = new ArrayList<>(pdrTrajectoryPolyline.getPoints());
-            points.add(pdrLocation);
-            pdrTrajectoryPolyline.setPoints(points);
+//            List<LatLng> points = new ArrayList<>(pdrTrajectoryPolyline.getPoints());
+//            points.add(pdrLocation);
+//            pdrTrajectoryPolyline.setPoints(points);
+        // Use Catmull-Rom smoothing instead of raw point append
+              appendSmoothedPoint(pdrLocation, fusedPdrControlPoints, pdrTrajectoryPolyline);
         }
+    }
+
+    /**
+     * Catmull-Rom spline: generates smooth interpolated points between p1→p2,
+     * using p0 and p3 as tangent guides. Curve always passes through p1 and p2.
+     */
+    private static List<LatLng> catmullRomSegment(
+            LatLng p0, LatLng p1, LatLng p2, LatLng p3, int numSteps) {
+        List<LatLng> result = new ArrayList<>();
+        for (int i = 1; i <= numSteps; i++) {
+            double t = (double) i / numSteps, t2 = t*t, t3 = t2*t;
+            double lat = 0.5 * ((-t3+2*t2-t)*p0.latitude  + (3*t3-5*t2+2)*p1.latitude
+                    + (-3*t3+4*t2+t)*p2.latitude + (t3-t2)*p3.latitude);
+            double lng = 0.5 * ((-t3+2*t2-t)*p0.longitude + (3*t3-5*t2+2)*p1.longitude
+                    + (-3*t3+4*t2+t)*p2.longitude + (t3-t2)*p3.longitude);
+            result.add(new LatLng(lat, lng));
+        }
+        return result;
+    }
+
+    /**
+     * Adds newPoint to a 4-point sliding window, then extends targetLine with a
+     * smooth Catmull-Rom segment. Falls back to straight line until 4 points arrive.
+     */
+    private void appendSmoothedPoint(
+            @NonNull LatLng newPoint,
+            @NonNull List<LatLng> controlBuf,
+            @NonNull Polyline targetLine) {
+        controlBuf.add(newPoint);
+        if (controlBuf.size() > 4) controlBuf.remove(0);
+
+        List<LatLng> pts = new ArrayList<>(targetLine.getPoints());
+        if (controlBuf.size() < 4) {
+            // Not enough points yet — draw straight line to keep path visible early on
+            pts.add(newPoint);
+        } else {
+            // Enough points — draw smooth curve from p1 to p2
+            pts.addAll(catmullRomSegment(
+                    controlBuf.get(0), controlBuf.get(1),
+                    controlBuf.get(2), controlBuf.get(3), 10));
+        }
+        targetLine.setPoints(pts);
     }
 
     /**
@@ -699,9 +747,11 @@ public class TrajectoryMapFragment extends Fragment {
      */
     public void addRawPdrPoint(@NonNull LatLng point) {
         if (polyline == null) return;
-        List<LatLng> points = new ArrayList<>(polyline.getPoints());
-        points.add(point);
-        polyline.setPoints(points);
+//        List<LatLng> points = new ArrayList<>(polyline.getPoints());
+//        points.add(point);
+//        polyline.setPoints(points);
+        // Use Catmull-Rom smoothing instead of raw point append
+        appendSmoothedPoint(point, rawPdrControlPoints, polyline);
     }
 
     // -------------------------------------------------------------------------
@@ -844,6 +894,10 @@ public class TrajectoryMapFragment extends Fragment {
             }
             // Reset the distance filter anchor so the first new point is always accepted
             lastPdrObservationLocation = null;
+            // Clear spline buffers so new session starts fresh
+            rawPdrControlPoints.clear();
+            fusedPdrControlPoints.clear();
+
             pdrTrajectoryPolyline = gMap.addPolyline(new PolylineOptions()
                     .color(Color.rgb(255, 165, 0))
                     .width(5f)
