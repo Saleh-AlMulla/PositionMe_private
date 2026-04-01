@@ -56,7 +56,7 @@ public class ParticleFilter {
     /** Minimum sigma for GNSS observations (metres). */
     private static final double GNSS_SIGMA_MIN = 3.0;
     /** Sigma for WiFi observations — tuned higher to avoid over-correction. */
-    private static final double WIFI_SIGMA_DEFAULT = 10.0;
+    private static final double WIFI_SIGMA_DEFAULT = 14.0;
 
     // ── State ────────────────────────────────────────────────────────────────
     private final Random rng = new Random(42);

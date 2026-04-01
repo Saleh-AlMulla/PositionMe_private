@@ -97,7 +97,7 @@ public class RecordingFragment extends Fragment {
 
     /** Heading smoothing to prevent arrow jitter on the map (§3.3). */
     private Float smoothedHeadingDeg = null;
-    private static final float HEADING_SMOOTHING_ALPHA = 0.20f;
+    private static final float HEADING_SMOOTHING_ALPHA = 0.4f;
 
     /** UI refresh task at 5 Hz. */
     private final Runnable refreshDataTask = new Runnable() {

@@ -79,7 +79,7 @@ public class TrajectoryMapFragment extends Fragment {
 
     // Auto-floor state
     private static final String TAG = "TrajectoryMapFragment";
-    private static final long AUTO_FLOOR_DEBOUNCE_MS = 3000;
+    private static final long AUTO_FLOOR_DEBOUNCE_MS = 500;
     private static final long AUTO_FLOOR_CHECK_INTERVAL_MS = 1000;
     private Handler autoFloorHandler;
     private Runnable autoFloorTask;
@@ -112,9 +112,9 @@ public class TrajectoryMapFragment extends Fragment {
      * The "last N observations" requirement in the assignment brief (section 3.3) is
      * satisfied by these caps: old markers are automatically removed as new ones appear.
      */
-    private static final int MAX_PDR_OBSERVATIONS = 3;
-    private static final int MAX_GNSS_OBSERVATIONS = 5;
-    private static final int MAX_WIFI_OBSERVATIONS = 5;
+    private static final int MAX_PDR_OBSERVATIONS = 2;
+    private static final int MAX_GNSS_OBSERVATIONS = 2;
+    private static final int MAX_WIFI_OBSERVATIONS = 2;
 
     /**
      * Separate lists for each positioning source's observation markers.

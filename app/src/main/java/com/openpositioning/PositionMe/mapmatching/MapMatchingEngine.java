@@ -61,16 +61,16 @@ public class MapMatchingEngine {
     // ── Floor transition parameters (§3.2 floor detection) ───────────────────
 
     /** Minimum barometric elevation change (metres) to trigger a floor transition. */
-    private static final double FLOOR_CHANGE_ELEVATION_THRESHOLD = 4.0;
+    private static final double FLOOR_CHANGE_ELEVATION_THRESHOLD = 2.0;
 
     /** Steps the elevation must remain above threshold before confirming transition. */
-    private static final int ELEVATION_SUSTAIN_STEPS = 5;
+    private static final int ELEVATION_SUSTAIN_STEPS = 2;
 
     /** Minimum steps between consecutive floor changes to prevent oscillation. */
-    private static final int MIN_STEPS_BETWEEN_FLOOR_CHANGES = 10;
+    private static final int MIN_STEPS_BETWEEN_FLOOR_CHANGES = 3;
 
     /** Warmup period (ms) after init during which floor transitions are suppressed. */
-    private static final long FLOOR_TRANSITION_WARMUP_MS = 30_000;
+    private static final long FLOOR_TRANSITION_WARMUP_MS = 5_000;
 
     /**
      * Maximum horizontal displacement (metres) during an elevation episode
