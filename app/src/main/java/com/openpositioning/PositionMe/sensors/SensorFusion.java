@@ -489,6 +489,17 @@ public class SensorFusion implements SensorEventListener {
     }
 
     /**
+     * Returns the floor estimated by the MapMatchingEngine's barometric
+     * particle filter, or -1 if not available.
+     */
+    public int getMapMatchingFloor() {
+        if (mapMatchingEngine != null && mapMatchingEngine.isActive()) {
+            return mapMatchingEngine.getEstimatedFloor();
+        }
+        return -1;
+    }
+
+    /**
      * Returns the map matching particle filter engine.
      */
     public MapMatchingEngine getMapMatchingEngine() {

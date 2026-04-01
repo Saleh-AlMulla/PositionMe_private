@@ -993,7 +993,11 @@ public class TrajectoryMapFragment extends Fragment {
         if (!indoorMapManager.getIsIndoorMapSet()) return;
 
         int candidateFloor;
-        if (sensorFusion.getLatLngWifiPositioning() != null) {
+
+        int mmFloor = sensorFusion.getMapMatchingFloor();
+        if (mmFloor >= 0) {
+            candidateFloor = mmFloor;
+        } else if (sensorFusion.getLatLngWifiPositioning() != null) {
             candidateFloor = sensorFusion.getWifiFloor();
         } else {
             float elevation = sensorFusion.getElevation();
@@ -1004,7 +1008,6 @@ public class TrajectoryMapFragment extends Fragment {
 
         indoorMapManager.setCurrentFloor(candidateFloor, true);
         updateFloorLabel();
-        // Seed the debounce state so subsequent checks don't re-trigger immediately
         lastCandidateFloor = candidateFloor;
         lastCandidateTime = SystemClock.elapsedRealtime();
     }
@@ -1032,18 +1035,24 @@ public class TrajectoryMapFragment extends Fragment {
 
         int candidateFloor;
 
-        // Priority 1: WiFi-based floor (only if WiFi com.openpositioning.PositionMe.positioning has returned data)
-        if (sensorFusion.getLatLngWifiPositioning() != null) {
+        // Priority 1: MapMatchingEngine floor (barometric with guards)
+        int mmFloor = sensorFusion.getMapMatchingFloor();
+        if (mmFloor >= 0) {
+            candidateFloor = mmFloor;
+        }
+        // Priority 2: WiFi floor
+        else if (sensorFusion.getLatLngWifiPositioning() != null) {
             candidateFloor = sensorFusion.getWifiFloor();
-        } else {
-            // Fallback: barometric elevation estimate
+        }
+        // Priority 3: Raw barometric elevation
+        else {
             float elevation = sensorFusion.getElevation();
             float floorHeight = indoorMapManager.getFloorHeight();
             if (floorHeight <= 0) return;
             candidateFloor = Math.round(elevation / floorHeight);
         }
 
-        // Debounce: require the same floor reading for AUTO_FLOOR_DEBOUNCE_MS
+        // Debounce (unchanged from original)
         long now = SystemClock.elapsedRealtime();
         if (candidateFloor != lastCandidateFloor) {
             lastCandidateFloor = candidateFloor;
@@ -1054,7 +1063,6 @@ public class TrajectoryMapFragment extends Fragment {
         if (now - lastCandidateTime >= AUTO_FLOOR_DEBOUNCE_MS) {
             indoorMapManager.setCurrentFloor(candidateFloor, true);
             updateFloorLabel();
-            // Reset timer so we don't keep re-applying the same floor
             lastCandidateTime = now;
         }
     }
