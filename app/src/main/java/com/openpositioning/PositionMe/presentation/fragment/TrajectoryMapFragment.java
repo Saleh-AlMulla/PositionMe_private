@@ -65,6 +65,10 @@ public class TrajectoryMapFragment extends Fragment {
     private final List<Marker> testPointMarkers = new ArrayList<>();
 
     private Polyline polyline; // Polyline representing user's movement path
+    // Catmull-Rom smoothing toggle
+    private boolean isCatmullRomEnabled = false;
+    private SwitchMaterial catmullSwitch;
+
     private boolean isRed = true; // Tracks whether the polyline color is red
     private boolean isGnssOn = false; // Tracks if GNSS tracking is enabled
 
@@ -134,6 +138,13 @@ public class TrajectoryMapFragment extends Fragment {
     private final List<Marker> wifiObservationMarkers = new ArrayList<>();
     private final List<Marker> pdrObservationMarkers = new ArrayList<>();
 
+    // Raw accepted PDR positions, used as source for Catmull-Rom redraw
+    private final List<LatLng> rawPdrPoints = new ArrayList<>();
+
+    // Index into rawPdrPoints from which Catmull-Rom smoothing applies.
+    // Points before this index are always drawn raw.
+    private int catmullStartIndex = 0;
+
 
     /**
      * Orange polyline connecting every accepted PDR position (filtered by distance threshold).
@@ -167,7 +178,7 @@ public class TrajectoryMapFragment extends Fragment {
      * noise is larger in scale than PDR noise.
      */
 
-    private static final double PDR_OBSERVATION_MIN_DISTANCE_M = 3.0;
+    private static final double PDR_OBSERVATION_MIN_DISTANCE_M = 3;
 
 
     // -------------------------------------------------------------------------
@@ -252,6 +263,13 @@ public class TrajectoryMapFragment extends Fragment {
         floorDownButton = view.findViewById(R.id.floorDownButton);
         floorLabel      = view.findViewById(R.id.floorLabel);
         switchColorButton = view.findViewById(R.id.lineColorButton);
+
+        catmullSwitch = view.findViewById(R.id.catmullSwitch);
+        catmullSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            isCatmullRomEnabled = isChecked;
+            // Redraw BOTH polylines with current points using new mode
+            redrawPdrPolyline();
+        });
 
         // Setup floor up/down UI hidden initially until we know there's an indoor map
         setFloorControlsVisibility(View.GONE);
@@ -684,13 +702,121 @@ public class TrajectoryMapFragment extends Fragment {
                 MAX_PDR_OBSERVATIONS
         );
 
-        // Extend the orange trajectory polyline with this accepted position.
-        // This builds the continuous walking path shown on the map.
+        // Store raw point for Catmull-Rom redraw source.
+        rawPdrPoints.add(pdrLocation);
+
+        // Build the displayed path:
+        // - points before catmullStartIndex are always drawn raw (history)
+        // - points from catmullStartIndex onward are smoothed if switch is on
         if (pdrTrajectoryPolyline != null) {
-            List<LatLng> points = new ArrayList<>(pdrTrajectoryPolyline.getPoints());
-            points.add(pdrLocation);
-            pdrTrajectoryPolyline.setPoints(points);
+            List<LatLng> displayPoints;
+            if (isCatmullRomEnabled && catmullStartIndex < rawPdrPoints.size()) {
+                // Raw history segment
+                List<LatLng> history = rawPdrPoints.subList(0, catmullStartIndex);
+                // Smoothed future segment (need at least 4 points for Catmull-Rom)
+                List<LatLng> future = new ArrayList<>(rawPdrPoints.subList(catmullStartIndex, rawPdrPoints.size()));
+                List<LatLng> smoothFuture = applyCatmullRom(future);
+                displayPoints = new ArrayList<>(history);
+                displayPoints.addAll(smoothFuture);
+            } else {
+                displayPoints = new ArrayList<>(rawPdrPoints);
+            }
+            pdrTrajectoryPolyline.setPoints(displayPoints);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // CATMULL-ROM SMOOTHING (NEW)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Computes one segment of a Catmull-Rom spline between p1 and p2,
+     * using p0 and p3 as the surrounding control points.
+     *
+     * WHY CATMULL-ROM:
+     * Unlike Bezier curves, Catmull-Rom splines pass through every control point,
+     * which means the smoothed path still visits every accepted PDR observation.
+     * This gives a natural-looking walking curve without drifting away from real data.
+     *
+     * @param p0    Control point before p1 (or p1 itself if i==0)
+     * @param p1    Start of this segment
+     * @param p2    End of this segment
+     * @param p3    Control point after p2 (or p2 itself if at end)
+     * @param steps Number of interpolated sub-points between p1 and p2 (higher = smoother)
+     * @return      Interpolated LatLng points for this segment
+     */
+    private List<LatLng> catmullRomSegment(LatLng p0, LatLng p1, LatLng p2, LatLng p3, int steps) {
+        List<LatLng> result = new ArrayList<>();
+        for (int i = 0; i <= steps; i++) {
+            float t = i / (float) steps;
+            float t2 = t * t, t3 = t2 * t;
+            double lat = 0.5 * ((2 * p1.latitude)
+                    + (-p0.latitude + p2.latitude) * t
+                    + (2*p0.latitude - 5*p1.latitude + 4*p2.latitude - p3.latitude) * t2
+                    + (-p0.latitude + 3*p1.latitude - 3*p2.latitude + p3.latitude) * t3);
+            double lng = 0.5 * ((2 * p1.longitude)
+                    + (-p0.longitude + p2.longitude) * t
+                    + (2*p0.longitude - 5*p1.longitude + 4*p2.longitude - p3.longitude) * t2
+                    + (-p0.longitude + 3*p1.longitude - 3*p2.longitude + p3.longitude) * t3);
+            result.add(new LatLng(lat, lng));
+        }
+        return result;
+    }
+
+    /**
+     * Applies Catmull-Rom smoothing to a full list of LatLng points.
+     *
+     * WHY 4-POINT MINIMUM:
+     * Catmull-Rom needs 4 points to define even one segment (p0 as lead-in,
+     * p1-p2 as the actual segment, p3 as look-ahead). With fewer than 4 points
+     * the spline is undefined, so we fall back to returning the raw points.
+     *
+     * @param pts  Raw list of accepted PDR positions
+     * @return     Smoothed list ready to be set on the polyline
+     */
+    private List<LatLng> applyCatmullRom(List<LatLng> pts) {
+        if (pts.size() < 4) return new ArrayList<>(pts);
+        List<LatLng> smooth = new ArrayList<>();
+        for (int i = 0; i < pts.size() - 1; i++) {
+            LatLng p1 = pts.get(i);
+            LatLng p2 = pts.get(i + 1);
+            // Skip smoothing for large jumps (e.g. GNSS dropout, sudden position jump)
+            // — draw straight line instead to avoid Catmull-Rom overshoot spikes
+            if (UtilFunctions.distanceBetweenPoints(p1, p2) > 5.0) {
+                smooth.add(p1);
+                smooth.add(p2);
+                continue;
+            }
+            LatLng p0 = pts.get(Math.max(i - 1, 0));
+            LatLng p3 = pts.get(Math.min(i + 2, pts.size() - 1));
+            smooth.addAll(catmullRomSegment(p0, p1, p2, p3, 10));
+        }
+        return smooth;
+    }
+
+    /**
+     * Redraws the orange PDR trajectory polyline.
+     *
+     * WHY WE SPLIT AT catmullStartIndex:
+     * When the switch is toggled mid-recording, we don't want to retroactively
+     * smooth the path the user already walked. catmullStartIndex marks the point
+     * in rawPdrPoints where smoothing was turned on, so history stays raw and
+     * only future points get the Catmull-Rom curve applied.
+     */
+    private void redrawPdrPolyline() {
+        if (pdrTrajectoryPolyline == null) return;
+
+        if (!isCatmullRomEnabled) {
+            // Switch turned off — restore full raw path
+            pdrTrajectoryPolyline.setPoints(new ArrayList<>(rawPdrPoints));
+            return;
+        }
+
+        // Switch just turned on — record where smoothing begins
+        catmullStartIndex = rawPdrPoints.size();
+
+        // History stays raw, nothing to smooth yet — no redraw needed
+        pdrTrajectoryPolyline.setPoints(new ArrayList<>(rawPdrPoints));
     }
 
     /**
@@ -844,6 +970,9 @@ public class TrajectoryMapFragment extends Fragment {
             }
             // Reset the distance filter anchor so the first new point is always accepted
             lastPdrObservationLocation = null;
+            // Clear the raw point store so Catmull-Rom starts fresh for the new session
+            rawPdrPoints.clear();
+            catmullStartIndex = 0;
             pdrTrajectoryPolyline = gMap.addPolyline(new PolylineOptions()
                     .color(Color.rgb(255, 165, 0))
                     .width(5f)
