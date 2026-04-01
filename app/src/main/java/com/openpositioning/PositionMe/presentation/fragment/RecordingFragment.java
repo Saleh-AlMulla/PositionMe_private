@@ -90,6 +90,12 @@ public class RecordingFragment extends Fragment {
     private static final long GNSS_DISPLAY_MIN_INTERVAL_MS = 1500L;
     private static final double GNSS_DISPLAY_MIN_DISTANCE_M = 3.0;
 
+    // Display-only GNSS sanity gates:
+// 1) If GNSS is >25 m away from the current displayed path, don't draw it.
+// 2) If a new GNSS point jumps >20 m from the last drawn GNSS point, don't draw it.
+    private static final double GNSS_MAX_DISPLAY_ERROR_M = 25.0;
+    private static final double GNSS_MAX_JUMP_FROM_LAST_M = 20.0;
+
     private LatLng lastDisplayedWifiObservation = null;
     private long lastDisplayedWifiTimeMs = 0L;
     private static final long WIFI_DISPLAY_MIN_INTERVAL_MS = 1500L;
@@ -333,21 +339,46 @@ public class RecordingFragment extends Fragment {
             if (trajectoryMapFragment.isGnssEnabled()) {
                 LatLng gnssLocation = new LatLng(gnss[0], gnss[1]);
                 LatLng currentLoc = trajectoryMapFragment.getCurrentLocation();
+
+                double errorDist = -1.0;
                 if (currentLoc != null) {
-                    double errorDist = UtilFunctions.distanceBetweenPoints(
-                            currentLoc, gnssLocation);
+                    errorDist = UtilFunctions.distanceBetweenPoints(currentLoc, gnssLocation);
                     gnssError.setVisibility(View.VISIBLE);
                     gnssError.setText(String.format(
                             getString(R.string.gnss_error) + "%.2fm", errorDist));
+                } else {
+                    gnssError.setVisibility(View.GONE);
                 }
-                if (shouldDisplayObservation(
-                        gnssLocation, lastDisplayedGnssObservation,
-                        now - lastDisplayedGnssTimeMs,
-                        GNSS_DISPLAY_MIN_INTERVAL_MS, GNSS_DISPLAY_MIN_DISTANCE_M)) {
+
+                boolean tooFarFromDisplayedPath =
+                        (currentLoc != null && errorDist > GNSS_MAX_DISPLAY_ERROR_M);
+
+                boolean hugeJumpFromLastDisplayed =
+                        (lastDisplayedGnssObservation != null &&
+                                UtilFunctions.distanceBetweenPoints(lastDisplayedGnssObservation, gnssLocation)
+                                        > GNSS_MAX_JUMP_FROM_LAST_M);
+
+                if (!tooFarFromDisplayedPath && !hugeJumpFromLastDisplayed &&
+                        shouldDisplayObservation(
+                                gnssLocation,
+                                lastDisplayedGnssObservation,
+                                now - lastDisplayedGnssTimeMs,
+                                GNSS_DISPLAY_MIN_INTERVAL_MS,
+                                GNSS_DISPLAY_MIN_DISTANCE_M)) {
+
                     trajectoryMapFragment.updateGNSS(gnssLocation);
                     lastDisplayedGnssObservation = gnssLocation;
                     lastDisplayedGnssTimeMs = now;
+
+                } else {
+                    if (tooFarFromDisplayedPath) {
+                        Log.d(TAG, "Skipping GNSS draw: too far from displayed path ("
+                                + String.format("%.2f", errorDist) + "m)");
+                    } else if (hugeJumpFromLastDisplayed) {
+                        Log.d(TAG, "Skipping GNSS draw: huge jump from last GNSS point");
+                    }
                 }
+
             } else {
                 gnssError.setVisibility(View.GONE);
                 trajectoryMapFragment.clearGNSS();
